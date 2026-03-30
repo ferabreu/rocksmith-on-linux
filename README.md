@@ -55,6 +55,10 @@ The same instructions should work for Rocksmith 2011 as well.
 - The authors are not responsible for any problems, damages, data loss, or other issues arising from the use of this software.
 - Use at your own risk.
 
+**Legal Notice:**
+- Rocksmith and Rocksmith 2014 are trademarks and properties of Ubisoft.
+- This project is an independent effort and is not affiliated with, endorsed by, or approved by Ubisoft.
+
 ---
 
 ## Additional technical details
