@@ -39,7 +39,7 @@ jobs:
         copy "dist\RS_ASIO.ini" "$stagingName\"
         copy "LICENSE" "$stagingName\"
         copy "README.md" "$stagingName\"
-        powershell -Command "Compress-Archive -Path '$stagingName' -DestinationPath '$stagingName-$env:GITHUB_REF_NAME.zip'"
+        powershell -Command "Compress-Archive -Path '$stagingName\*' -DestinationPath '$stagingName-$env:GITHUB_REF_NAME.zip'"
 
     - name: Upload Release Assets
       uses: softprops/action-gh-release@v2
