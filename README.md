@@ -1,3 +1,5 @@
+# THIS BRANCH IS NOT READY FOR PRODUCTION USE. It is currently a work in progress. It does not work. Do not compile or use.
+
 # RS2011-ASIO
 
 This project aims to add ASIO support to Ubisoft's **Rocksmith (2011)**, allowing the game to be run on Linux, using Steam/Proton, Pipewire (or JACK), and WineASIO.
