@@ -1,9 +1,9 @@
 # ASIO Support Branch — Status Report
 
-**Branch**: `asio-support`  
-**Date abandoned**: April 2026  
+**Branch**: `asio-support`
 **Goal**: Enable Rocksmith 2011 guitar audio input via ASIO (WineASIO/PipeWire) on
 Linux/Proton, without requiring the physical Real Tone Cable to be connected.
+**Status**: awaiting further development.
 
 ---
 
