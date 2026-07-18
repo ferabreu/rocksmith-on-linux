@@ -1,5 +1,15 @@
 ![rocksmith-on-linux](assets/rocksmith-logo-terminal.png)[^1]
 
+## WARNING
+
+When I finished developing this patch, I used it to play Rocksmith on Linux for a few weeks. Now, after some months, I tried to play again and the game does not detect the Real Tone Cable.
+
+So, looks like the implementation is flimsy. I will try to find out what happened - probably some update on some point of the runtime chain broke something.
+
+Meanwhile, I recommend not using the patch in it's current state. I have been using Rocksmith 2014 to practice - Micael Dias' [RS ASIO](https://github.com/mdias/rs_asio) is still running strong.
+
+## Intro
+
 This project aims to add ASIO support to Ubisoft's **Rocksmith**, allowing the game to be run on Linux, using Steam/Proton, Pipewire (or JACK), and WineASIO.
 
 Rocksmith is different from Rocksmith 2014 in how it handles audio, and the original RS ASIO mod doesn't work with it. This project is a fork of RS ASIO, with changes to make it compatible with Rocksmith.
