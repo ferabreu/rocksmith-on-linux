@@ -14,6 +14,12 @@ DEFINE_PROPERTYKEY(PKEY_Device_DeviceIdHiddenKey2, 0x83DA6326, 0x97A6, 0x4088, 0
 
 #define DEBUG_PRINT_HR(hr) if(FAILED(hr)) rslog::info_ts() << "  hr: " << HResultToStr(hr) << std::endl
 
+static bool ShouldTracePropertyReads(const std::wstring& deviceId)
+{
+	return deviceId.find(L"{ASIO IN") != std::wstring::npos ||
+		deviceId.find(L"{0.0.1.") != std::wstring::npos;
+}
+
 DebugWrapperDevicePropertyStore::DebugWrapperDevicePropertyStore(IPropertyStore& realPropertyStore, const std::wstring& deviceId)
 	: m_RealPropertyStore(realPropertyStore)
 	, m_DeviceId(deviceId)
@@ -55,12 +61,16 @@ HRESULT STDMETHODCALLTYPE DebugWrapperDevicePropertyStore::GetAt(DWORD iProp, PR
 
 HRESULT STDMETHODCALLTYPE DebugWrapperDevicePropertyStore::GetValue(REFPROPERTYKEY key, PROPVARIANT *pv)
 {
-	//rslog::info_ts() << m_DeviceId << " " __FUNCTION__ " - key: " << key << std::endl;
+	const bool trace = ShouldTracePropertyReads(m_DeviceId);
+	if (trace)
+	{
+		rslog::info_ts() << m_DeviceId << " " << __FUNCTION__ << " - key: " << key << std::endl;
+	}
 
 	HRESULT hr = m_RealPropertyStore.GetValue(key, pv);
 	DEBUG_PRINT_HR(hr);
-	/*
-	if (hr == S_OK)
+
+	if (trace && hr == S_OK)
 	{
 		if (pv->vt == VT_EMPTY)
 		{
@@ -81,8 +91,17 @@ HRESULT STDMETHODCALLTYPE DebugWrapperDevicePropertyStore::GetValue(REFPROPERTYK
 			else if (pv->vt == VT_LPSTR)
 				rslog::info_ts() << "  friendly name: " << std::dec << pv->pszVal << std::endl;
 		}
+		else if (key == PKEY_DeviceInterface_FriendlyName)
+		{
+			if (pv->vt == VT_LPWSTR)
+				rslog::info_ts() << "  interface friendly name: " << std::dec << pv->pwszVal << std::endl;
+		}
+		else if (key == PKEY_Device_DeviceDesc)
+		{
+			if (pv->vt == VT_LPWSTR)
+				rslog::info_ts() << "  device description: " << std::dec << pv->pwszVal << std::endl;
+		}
 	}
-	*/
 
 	return hr;
 }

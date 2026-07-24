@@ -1,6 +1,13 @@
 #include "stdafx.h"
 #include "dllmain.h"
 #include "Patcher.h"
+#include <sstream>
+#include <setupapi.h>
+
+#ifdef _MSC_VER
+#pragma comment(lib, "Setupapi.lib")
+#pragma comment(lib, "Advapi32.lib")
+#endif
 
 // Patch code for Rocksmith (2011), CRC32 0xe0f686e0
 //
@@ -14,6 +21,18 @@
 //
 // IAT entry RVAs (relative to image base 0x00400000, verified from the PE headers):
 //
+//   RegQueryValueExW                     RVA 0x0088d000  (advapi32.dll)
+//   RegCloseKey                          RVA 0x0088d004  (advapi32.dll)
+//
+//   SetupDiGetClassDevsW                 RVA 0x0088d2bc  (setupapi.dll)
+//   SetupDiOpenDeviceInterfaceRegKey     RVA 0x0088d2c0  (setupapi.dll)
+//   SetupDiGetDeviceRegistryPropertyW    RVA 0x0088d2c4  (setupapi.dll)
+//   SetupDiGetDeviceInterfaceDetailW     RVA 0x0088d2c8  (setupapi.dll)
+//   SetupDiDestroyDeviceInfoList         RVA 0x0088d2cc  (setupapi.dll)
+//   SetupDiGetDeviceInterfaceAlias       RVA 0x0088d2d0  (setupapi.dll)
+//   SetupDiGetClassDevsA                 RVA 0x0088d2d4  (setupapi.dll)
+//   SetupDiEnumDeviceInterfaces          RVA 0x0088d2d8  (setupapi.dll)
+//
 //   CoCreateInstance                      RVA 0x0088d47c  (ole32.dll)
 //   CoMarshalInterThreadInterfaceInStream  RVA 0x0088d490  (ole32.dll)
 //   CoGetInterfaceAndReleaseStream         RVA 0x0088d494  (ole32.dll)
@@ -23,6 +42,46 @@
 static const DWORD IAT_RVA_CoCreateInstance                     = 0x0088d47c;
 static const DWORD IAT_RVA_CoMarshalInterThreadInterfaceInStream = 0x0088d490;
 static const DWORD IAT_RVA_CoGetInterfaceAndReleaseStream        = 0x0088d494;
+static const DWORD IAT_RVA_RegQueryValueExW                      = 0x0088d000;
+static const DWORD IAT_RVA_RegCloseKey                           = 0x0088d004;
+static const DWORD IAT_RVA_SetupDiGetClassDevsW                  = 0x0088d2bc;
+static const DWORD IAT_RVA_SetupDiOpenDeviceInterfaceRegKey      = 0x0088d2c0;
+static const DWORD IAT_RVA_SetupDiGetDeviceRegistryPropertyW     = 0x0088d2c4;
+static const DWORD IAT_RVA_SetupDiGetDeviceInterfaceDetailW      = 0x0088d2c8;
+static const DWORD IAT_RVA_SetupDiDestroyDeviceInfoList          = 0x0088d2cc;
+static const DWORD IAT_RVA_SetupDiGetDeviceInterfaceAlias        = 0x0088d2d0;
+static const DWORD IAT_RVA_SetupDiGetClassDevsA                  = 0x0088d2d4;
+static const DWORD IAT_RVA_SetupDiEnumDeviceInterfaces           = 0x0088d2d8;
+
+static std::mutex g_setupDiRegKeysMutex;
+static std::set<HKEY> g_setupDiRegKeys;
+
+static HKEY GetInvalidHKeyValue()
+{
+	return reinterpret_cast<HKEY>(INVALID_HANDLE_VALUE);
+}
+
+static void TrackSetupDiRegKey(HKEY key, bool track)
+{
+	if (!key || key == GetInvalidHKeyValue())
+		return;
+
+	std::lock_guard<std::mutex> g(g_setupDiRegKeysMutex);
+	if (track)
+	{
+		g_setupDiRegKeys.insert(key);
+	}
+	else
+	{
+		g_setupDiRegKeys.erase(key);
+	}
+}
+
+static bool IsTrackedSetupDiRegKey(HKEY key)
+{
+	std::lock_guard<std::mutex> g(g_setupDiRegKeysMutex);
+	return g_setupDiRegKeys.find(key) != g_setupDiRegKeys.end();
+}
 
 // Patch a single IAT slot to point to replacementFn.
 // Patch_ReplaceWithBytes (from Patcher.h) handles page protection internally
@@ -59,7 +118,7 @@ static bool PatchIATEntry(DWORD rva, void* replacementFn, const char* fnName)
 static HRESULT STDAPICALLTYPE Patched_CoMarshalInterThreadInterfaceInStream(
     REFIID riid, IUnknown* pUnk, IStream** ppStm)
 {
-	rslog::info_ts() << "Patched_CoMarshalInterThreadInterfaceInStream called" << std::endl;
+	rslog::info_ts() << "Patched_CoMarshalInterThreadInterfaceInStream called - riid: " << riid << std::endl;
 	// Return the interface directly as the "stream" — PortAudio will read it back
 	// via Patched_CoGetInterfaceAndReleaseStream below.
 	if (!ppStm)
@@ -73,7 +132,7 @@ static HRESULT STDAPICALLTYPE Patched_CoMarshalInterThreadInterfaceInStream(
 static HRESULT STDAPICALLTYPE Patched_CoGetInterfaceAndReleaseStream(
     IStream* pStm, REFIID riid, void** ppv)
 {
-	rslog::info_ts() << "Patched_CoGetInterfaceAndReleaseStream called" << std::endl;
+	rslog::info_ts() << "Patched_CoGetInterfaceAndReleaseStream called - riid: " << riid << std::endl;
 	if (!ppv)
 		return E_POINTER;
 	// The "stream" is actually the interface pointer stored by Patched_CoMarshalInterThreadInterfaceInStream.
@@ -91,6 +150,209 @@ static HRESULT STDAPICALLTYPE Patched_CoGetInterfaceAndReleaseStream(
 	return S_OK;
 }
 
+static HDEVINFO WINAPI Patched_SetupDiGetClassDevsW(const GUID* ClassGuid, PCWSTR Enumerator, HWND hwndParent, DWORD Flags)
+{
+	std::ostringstream msg;
+	msg << "Patched_SetupDiGetClassDevsW called - flags: 0x" << std::hex << Flags << std::dec;
+	if (ClassGuid)
+		msg << "  classGuid: " << *ClassGuid;
+	if (Enumerator)
+		msg << "  enumerator: " << Enumerator;
+	rslog::info_ts() << msg.str() << std::endl;
+
+	HDEVINFO result = SetupDiGetClassDevsW(ClassGuid, Enumerator, hwndParent, Flags);
+	const DWORD gle = GetLastError();
+	rslog::info_ts() << "  -> " << result << "  gle=" << std::dec << gle << std::endl;
+	return result;
+}
+
+static HDEVINFO WINAPI Patched_SetupDiGetClassDevsA(const GUID* ClassGuid, PCSTR Enumerator, HWND hwndParent, DWORD Flags)
+{
+	rslog::info_ts() << "Patched_SetupDiGetClassDevsA called - flags: 0x" << std::hex << Flags << std::dec << std::endl;
+	HDEVINFO result = SetupDiGetClassDevsA(ClassGuid, Enumerator, hwndParent, Flags);
+	const DWORD gle = GetLastError();
+	rslog::info_ts() << "  -> " << result << "  gle=" << std::dec << gle << std::endl;
+	return result;
+}
+
+static BOOL WINAPI Patched_SetupDiEnumDeviceInterfaces(
+	HDEVINFO DeviceInfoSet,
+	PSP_DEVINFO_DATA DeviceInfoData,
+	const GUID* InterfaceClassGuid,
+	DWORD MemberIndex,
+	PSP_DEVICE_INTERFACE_DATA DeviceInterfaceData)
+{
+	std::ostringstream msg;
+	msg << "Patched_SetupDiEnumDeviceInterfaces called - MemberIndex: " << std::dec << MemberIndex;
+	if (InterfaceClassGuid)
+		msg << "  interfaceClassGuid: " << *InterfaceClassGuid;
+	rslog::info_ts() << msg.str() << std::endl;
+
+	BOOL ok = SetupDiEnumDeviceInterfaces(DeviceInfoSet, DeviceInfoData, InterfaceClassGuid, MemberIndex, DeviceInterfaceData);
+	const DWORD gle = GetLastError();
+	rslog::info_ts() << "  -> " << std::dec << ok << "  gle=" << gle << std::endl;
+	return ok;
+}
+
+static BOOL WINAPI Patched_SetupDiGetDeviceInterfaceAlias(
+	HDEVINFO DeviceInfoSet,
+	PSP_DEVICE_INTERFACE_DATA DeviceInterfaceData,
+	const GUID* AliasInterfaceClassGuid,
+	PSP_DEVICE_INTERFACE_DATA AliasDeviceInterfaceData)
+{
+	std::ostringstream msg;
+	msg << "Patched_SetupDiGetDeviceInterfaceAlias called";
+	if (AliasInterfaceClassGuid)
+		msg << "  aliasClassGuid: " << *AliasInterfaceClassGuid;
+	rslog::info_ts() << msg.str() << std::endl;
+
+	BOOL ok = SetupDiGetDeviceInterfaceAlias(DeviceInfoSet, DeviceInterfaceData, AliasInterfaceClassGuid, AliasDeviceInterfaceData);
+	const DWORD gle = GetLastError();
+	rslog::info_ts() << "  -> " << std::dec << ok << "  gle=" << gle << std::endl;
+	return ok;
+}
+
+static BOOL WINAPI Patched_SetupDiGetDeviceInterfaceDetailW(
+	HDEVINFO DeviceInfoSet,
+	PSP_DEVICE_INTERFACE_DATA DeviceInterfaceData,
+	PSP_DEVICE_INTERFACE_DETAIL_DATA_W DeviceInterfaceDetailData,
+	DWORD DeviceInterfaceDetailDataSize,
+	PDWORD RequiredSize,
+	PSP_DEVINFO_DATA DeviceInfoData)
+{
+	rslog::info_ts() << "Patched_SetupDiGetDeviceInterfaceDetailW called - detailSize: " << std::dec << DeviceInterfaceDetailDataSize << std::endl;
+
+	BOOL ok = SetupDiGetDeviceInterfaceDetailW(
+		DeviceInfoSet,
+		DeviceInterfaceData,
+		DeviceInterfaceDetailData,
+		DeviceInterfaceDetailDataSize,
+		RequiredSize,
+		DeviceInfoData);
+
+	const DWORD gle = GetLastError();
+	rslog::info_ts() << "  -> " << std::dec << ok << "  gle=" << gle;
+	if (RequiredSize)
+		rslog::info_ts() << "  requiredSize=" << *RequiredSize;
+	rslog::info_ts() << std::endl;
+
+	if (ok && DeviceInterfaceDetailData)
+	{
+		rslog::info_ts() << "  devicePath: " << DeviceInterfaceDetailData->DevicePath << std::endl;
+	}
+
+	return ok;
+}
+
+static BOOL WINAPI Patched_SetupDiGetDeviceRegistryPropertyW(
+	HDEVINFO DeviceInfoSet,
+	PSP_DEVINFO_DATA DeviceInfoData,
+	DWORD Property,
+	PDWORD PropertyRegDataType,
+	PBYTE PropertyBuffer,
+	DWORD PropertyBufferSize,
+	PDWORD RequiredSize)
+{
+	rslog::info_ts() << "Patched_SetupDiGetDeviceRegistryPropertyW called - property: " << std::dec << Property << std::endl;
+
+	BOOL ok = SetupDiGetDeviceRegistryPropertyW(
+		DeviceInfoSet,
+		DeviceInfoData,
+		Property,
+		PropertyRegDataType,
+		PropertyBuffer,
+		PropertyBufferSize,
+		RequiredSize);
+
+	const DWORD gle = GetLastError();
+	rslog::info_ts() << "  -> " << std::dec << ok << "  gle=" << gle;
+	if (PropertyRegDataType)
+		rslog::info_ts() << "  type=" << *PropertyRegDataType;
+	if (RequiredSize)
+		rslog::info_ts() << "  requiredSize=" << *RequiredSize;
+	rslog::info_ts() << std::endl;
+
+	return ok;
+}
+
+static HKEY WINAPI Patched_SetupDiOpenDeviceInterfaceRegKey(
+	HDEVINFO DeviceInfoSet,
+	PSP_DEVICE_INTERFACE_DATA DeviceInterfaceData,
+	DWORD Reserved,
+	REGSAM samDesired)
+{
+	rslog::info_ts() << "Patched_SetupDiOpenDeviceInterfaceRegKey called - samDesired: 0x" << std::hex << samDesired << std::dec << std::endl;
+
+	HKEY key = SetupDiOpenDeviceInterfaceRegKey(DeviceInfoSet, DeviceInterfaceData, Reserved, samDesired);
+	const DWORD gle = GetLastError();
+	rslog::info_ts() << "  -> " << key << "  gle=" << std::dec << gle << std::endl;
+
+	if (key && key != GetInvalidHKeyValue())
+	{
+		TrackSetupDiRegKey(key, true);
+	}
+
+	return key;
+}
+
+static BOOL WINAPI Patched_SetupDiDestroyDeviceInfoList(HDEVINFO DeviceInfoSet)
+{
+	rslog::info_ts() << "Patched_SetupDiDestroyDeviceInfoList called" << std::endl;
+	BOOL ok = SetupDiDestroyDeviceInfoList(DeviceInfoSet);
+	const DWORD gle = GetLastError();
+	rslog::info_ts() << "  -> " << std::dec << ok << "  gle=" << gle << std::endl;
+	return ok;
+}
+
+static LSTATUS WINAPI Patched_RegQueryValueExW(
+	HKEY hKey,
+	LPCWSTR lpValueName,
+	LPDWORD lpReserved,
+	LPDWORD lpType,
+	LPBYTE lpData,
+	LPDWORD lpcbData)
+{
+	const bool tracked = IsTrackedSetupDiRegKey(hKey);
+	if (tracked)
+	{
+		rslog::info_ts() << "Patched_RegQueryValueExW (SetupDi key) - value: "
+		                 << (lpValueName ? lpValueName : L"<default>")
+		                 << std::endl;
+	}
+
+	LSTATUS status = RegQueryValueExW(hKey, lpValueName, lpReserved, lpType, lpData, lpcbData);
+
+	if (tracked)
+	{
+		rslog::info_ts() << "  -> status=" << std::dec << status;
+		if (lpType)
+			rslog::info_ts() << " type=" << *lpType;
+		if (lpcbData)
+			rslog::info_ts() << " size=" << *lpcbData;
+		rslog::info_ts() << std::endl;
+	}
+
+	return status;
+}
+
+static LSTATUS WINAPI Patched_RegCloseKey(HKEY hKey)
+{
+	const bool tracked = IsTrackedSetupDiRegKey(hKey);
+	if (tracked)
+	{
+		rslog::info_ts() << "Patched_RegCloseKey (SetupDi key)" << std::endl;
+	}
+
+	LSTATUS status = RegCloseKey(hKey);
+	if (tracked)
+	{
+		TrackSetupDiRegKey(hKey, false);
+		rslog::info_ts() << "  -> status=" << std::dec << status << std::endl;
+	}
+
+	return status;
+}
+
 void PatchOriginalCode_e0f686e0()
 {
 	rslog::info_ts() << __FUNCTION__ << " - patching Rocksmith 2011 via IAT" << std::endl;
@@ -100,6 +362,46 @@ void PatchOriginalCode_e0f686e0()
 	ok &= PatchIATEntry(IAT_RVA_CoCreateInstance,
 	                    reinterpret_cast<void*>(&Patched_CoCreateInstance),
 	                    "CoCreateInstance");
+
+	ok &= PatchIATEntry(IAT_RVA_RegQueryValueExW,
+	                    reinterpret_cast<void*>(&Patched_RegQueryValueExW),
+	                    "RegQueryValueExW");
+
+	ok &= PatchIATEntry(IAT_RVA_RegCloseKey,
+	                    reinterpret_cast<void*>(&Patched_RegCloseKey),
+	                    "RegCloseKey");
+
+	ok &= PatchIATEntry(IAT_RVA_SetupDiGetClassDevsW,
+	                    reinterpret_cast<void*>(&Patched_SetupDiGetClassDevsW),
+	                    "SetupDiGetClassDevsW");
+
+	ok &= PatchIATEntry(IAT_RVA_SetupDiOpenDeviceInterfaceRegKey,
+	                    reinterpret_cast<void*>(&Patched_SetupDiOpenDeviceInterfaceRegKey),
+	                    "SetupDiOpenDeviceInterfaceRegKey");
+
+	ok &= PatchIATEntry(IAT_RVA_SetupDiGetDeviceRegistryPropertyW,
+	                    reinterpret_cast<void*>(&Patched_SetupDiGetDeviceRegistryPropertyW),
+	                    "SetupDiGetDeviceRegistryPropertyW");
+
+	ok &= PatchIATEntry(IAT_RVA_SetupDiGetDeviceInterfaceDetailW,
+	                    reinterpret_cast<void*>(&Patched_SetupDiGetDeviceInterfaceDetailW),
+	                    "SetupDiGetDeviceInterfaceDetailW");
+
+	ok &= PatchIATEntry(IAT_RVA_SetupDiDestroyDeviceInfoList,
+	                    reinterpret_cast<void*>(&Patched_SetupDiDestroyDeviceInfoList),
+	                    "SetupDiDestroyDeviceInfoList");
+
+	ok &= PatchIATEntry(IAT_RVA_SetupDiGetDeviceInterfaceAlias,
+	                    reinterpret_cast<void*>(&Patched_SetupDiGetDeviceInterfaceAlias),
+	                    "SetupDiGetDeviceInterfaceAlias");
+
+	ok &= PatchIATEntry(IAT_RVA_SetupDiGetClassDevsA,
+	                    reinterpret_cast<void*>(&Patched_SetupDiGetClassDevsA),
+	                    "SetupDiGetClassDevsA");
+
+	ok &= PatchIATEntry(IAT_RVA_SetupDiEnumDeviceInterfaces,
+	                    reinterpret_cast<void*>(&Patched_SetupDiEnumDeviceInterfaces),
+	                    "SetupDiEnumDeviceInterfaces");
 
 	ok &= PatchIATEntry(IAT_RVA_CoMarshalInterThreadInterfaceInStream,
 	                    reinterpret_cast<void*>(&Patched_CoMarshalInterThreadInterfaceInStream),
