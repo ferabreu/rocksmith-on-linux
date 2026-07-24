@@ -1,6 +1,8 @@
 #include "stdafx.h"
 #include "dllmain.h"
 #include "Patcher.h"
+#include <cstring>
+#include <cwchar>
 #include <sstream>
 #include <setupapi.h>
 
@@ -55,13 +57,92 @@ static const DWORD IAT_RVA_SetupDiEnumDeviceInterfaces           = 0x0088d2d8;
 
 static std::mutex g_setupDiRegKeysMutex;
 static std::set<HKEY> g_setupDiRegKeys;
+static std::set<HKEY> g_fakeSetupDiRegKeys;
+
+static const ULONG_PTR kFakeSetupDiInterfaceTag = 0x52534149; // "RSAI"
+static const wchar_t* kFakeSetupDiDevicePath = L"\\\\?\\USB#VID_12BA&PID_00FF#RS_ASIO#{6994ad04-93ef-11d0-a3cc-00a0c9223196}";
+static const wchar_t* kFakeSetupDiRegValue = L"USB\\VID_12BA&PID_00FF\\RS_ASIO";
+static const wchar_t* kFakeSetupDiFriendlyName = L"Rocksmith Guitar Adapter Mono";
+static const wchar_t* kFakeSetupDiDeviceDesc = L"Rocksmith USB Guitar Adapter";
 
 static HKEY GetInvalidHKeyValue()
 {
 	return reinterpret_cast<HKEY>(INVALID_HANDLE_VALUE);
 }
 
-static void TrackSetupDiRegKey(HKEY key, bool track)
+static bool IsAudioInterfaceGuid(const GUID* guid)
+{
+	return guid && IsEqualGUID(*guid, KSCATEGORY_AUDIO);
+}
+
+static bool IsFakeSetupDiInterfaceData(const SP_DEVICE_INTERFACE_DATA* interfaceData)
+{
+	return interfaceData && interfaceData->Reserved == kFakeSetupDiInterfaceTag;
+}
+
+static void FillFakeSetupDiInterfaceData(PSP_DEVICE_INTERFACE_DATA interfaceData, const GUID* interfaceClassGuid)
+{
+	if (!interfaceData)
+		return;
+
+	interfaceData->cbSize = sizeof(SP_DEVICE_INTERFACE_DATA);
+	interfaceData->InterfaceClassGuid = interfaceClassGuid ? *interfaceClassGuid : KSCATEGORY_AUDIO;
+	interfaceData->Flags = SPINT_ACTIVE;
+	interfaceData->Reserved = kFakeSetupDiInterfaceTag;
+}
+
+static BOOL CopyRegSzToBuffer(const wchar_t* value, PDWORD outType, PBYTE outBuffer, DWORD outBufferSize, PDWORD outRequiredSize)
+{
+	if (!value)
+		value = L"";
+
+	const DWORD bytesRequired = static_cast<DWORD>((wcslen(value) + 1) * sizeof(wchar_t));
+
+	if (outType)
+		*outType = REG_SZ;
+	if (outRequiredSize)
+		*outRequiredSize = bytesRequired;
+
+	if (!outBuffer || outBufferSize < bytesRequired)
+	{
+		SetLastError(ERROR_INSUFFICIENT_BUFFER);
+		return FALSE;
+	}
+
+	memcpy(outBuffer, value, bytesRequired);
+	SetLastError(ERROR_SUCCESS);
+	return TRUE;
+}
+
+static BOOL CopyRegMultiSzToBuffer(const wchar_t* value, PDWORD outType, PBYTE outBuffer, DWORD outBufferSize, PDWORD outRequiredSize)
+{
+	if (!value)
+		value = L"";
+
+	const size_t valueChars = wcslen(value);
+	const DWORD bytesRequired = static_cast<DWORD>((valueChars + 2) * sizeof(wchar_t));
+
+	if (outType)
+		*outType = REG_MULTI_SZ;
+	if (outRequiredSize)
+		*outRequiredSize = bytesRequired;
+
+	if (!outBuffer || outBufferSize < bytesRequired)
+	{
+		SetLastError(ERROR_INSUFFICIENT_BUFFER);
+		return FALSE;
+	}
+
+	wchar_t* out = reinterpret_cast<wchar_t*>(outBuffer);
+	memcpy(out, value, valueChars * sizeof(wchar_t));
+	out[valueChars] = L'\0';
+	out[valueChars + 1] = L'\0';
+
+	SetLastError(ERROR_SUCCESS);
+	return TRUE;
+}
+
+static void TrackSetupDiRegKey(HKEY key, bool track, bool isFake)
 {
 	if (!key || key == GetInvalidHKeyValue())
 		return;
@@ -70,10 +151,13 @@ static void TrackSetupDiRegKey(HKEY key, bool track)
 	if (track)
 	{
 		g_setupDiRegKeys.insert(key);
+		if (isFake)
+			g_fakeSetupDiRegKeys.insert(key);
 	}
 	else
 	{
 		g_setupDiRegKeys.erase(key);
+		g_fakeSetupDiRegKeys.erase(key);
 	}
 }
 
@@ -81,6 +165,12 @@ static bool IsTrackedSetupDiRegKey(HKEY key)
 {
 	std::lock_guard<std::mutex> g(g_setupDiRegKeysMutex);
 	return g_setupDiRegKeys.find(key) != g_setupDiRegKeys.end();
+}
+
+static bool IsFakeSetupDiRegKey(HKEY key)
+{
+	std::lock_guard<std::mutex> g(g_setupDiRegKeysMutex);
+	return g_fakeSetupDiRegKeys.find(key) != g_fakeSetupDiRegKeys.end();
 }
 
 // Patch a single IAT slot to point to replacementFn.
@@ -168,7 +258,14 @@ static HDEVINFO WINAPI Patched_SetupDiGetClassDevsW(const GUID* ClassGuid, PCWST
 
 static HDEVINFO WINAPI Patched_SetupDiGetClassDevsA(const GUID* ClassGuid, PCSTR Enumerator, HWND hwndParent, DWORD Flags)
 {
-	rslog::info_ts() << "Patched_SetupDiGetClassDevsA called - flags: 0x" << std::hex << Flags << std::dec << std::endl;
+	std::ostringstream msg;
+	msg << "Patched_SetupDiGetClassDevsA called - flags: 0x" << std::hex << Flags << std::dec;
+	if (ClassGuid)
+		msg << "  classGuid: " << *ClassGuid;
+	if (Enumerator)
+		msg << "  enumerator: " << Enumerator;
+	rslog::info_ts() << msg.str() << std::endl;
+
 	HDEVINFO result = SetupDiGetClassDevsA(ClassGuid, Enumerator, hwndParent, Flags);
 	const DWORD gle = GetLastError();
 	rslog::info_ts() << "  -> " << result << "  gle=" << std::dec << gle << std::endl;
@@ -190,6 +287,18 @@ static BOOL WINAPI Patched_SetupDiEnumDeviceInterfaces(
 
 	BOOL ok = SetupDiEnumDeviceInterfaces(DeviceInfoSet, DeviceInfoData, InterfaceClassGuid, MemberIndex, DeviceInterfaceData);
 	const DWORD gle = GetLastError();
+
+	if (!ok && gle == ERROR_NO_MORE_ITEMS && MemberIndex == 0 && IsAudioInterfaceGuid(InterfaceClassGuid))
+	{
+		if (DeviceInterfaceData && DeviceInterfaceData->cbSize == sizeof(SP_DEVICE_INTERFACE_DATA))
+		{
+			FillFakeSetupDiInterfaceData(DeviceInterfaceData, InterfaceClassGuid);
+			SetLastError(ERROR_SUCCESS);
+			rslog::info_ts() << "  -> synthesized fake KSCATEGORY_AUDIO interface" << std::endl;
+			return TRUE;
+		}
+	}
+
 	rslog::info_ts() << "  -> " << std::dec << ok << "  gle=" << gle << std::endl;
 	return ok;
 }
@@ -206,6 +315,21 @@ static BOOL WINAPI Patched_SetupDiGetDeviceInterfaceAlias(
 		msg << "  aliasClassGuid: " << *AliasInterfaceClassGuid;
 	rslog::info_ts() << msg.str() << std::endl;
 
+	if (IsFakeSetupDiInterfaceData(DeviceInterfaceData))
+	{
+		if (AliasDeviceInterfaceData && AliasDeviceInterfaceData->cbSize == sizeof(SP_DEVICE_INTERFACE_DATA))
+		{
+			FillFakeSetupDiInterfaceData(AliasDeviceInterfaceData, AliasInterfaceClassGuid);
+			SetLastError(ERROR_SUCCESS);
+			rslog::info_ts() << "  -> synthesized alias for fake interface" << std::endl;
+			return TRUE;
+		}
+
+		SetLastError(ERROR_INVALID_USER_BUFFER);
+		rslog::info_ts() << "  -> 0  gle=" << std::dec << ERROR_INVALID_USER_BUFFER << std::endl;
+		return FALSE;
+	}
+
 	BOOL ok = SetupDiGetDeviceInterfaceAlias(DeviceInfoSet, DeviceInterfaceData, AliasInterfaceClassGuid, AliasDeviceInterfaceData);
 	const DWORD gle = GetLastError();
 	rslog::info_ts() << "  -> " << std::dec << ok << "  gle=" << gle << std::endl;
@@ -221,6 +345,33 @@ static BOOL WINAPI Patched_SetupDiGetDeviceInterfaceDetailW(
 	PSP_DEVINFO_DATA DeviceInfoData)
 {
 	rslog::info_ts() << "Patched_SetupDiGetDeviceInterfaceDetailW called - detailSize: " << std::dec << DeviceInterfaceDetailDataSize << std::endl;
+
+	if (IsFakeSetupDiInterfaceData(DeviceInterfaceData))
+	{
+		const DWORD requiredBytes = static_cast<DWORD>(FIELD_OFFSET(SP_DEVICE_INTERFACE_DETAIL_DATA_W, DevicePath) + ((wcslen(kFakeSetupDiDevicePath) + 1) * sizeof(wchar_t)));
+		if (RequiredSize)
+			*RequiredSize = requiredBytes;
+
+		if (!DeviceInterfaceDetailData || DeviceInterfaceDetailDataSize < requiredBytes)
+		{
+			SetLastError(ERROR_INSUFFICIENT_BUFFER);
+			rslog::info_ts() << "  -> 0  gle=" << std::dec << ERROR_INSUFFICIENT_BUFFER << "  requiredSize=" << requiredBytes << std::endl;
+			return FALSE;
+		}
+
+		memcpy(DeviceInterfaceDetailData->DevicePath, kFakeSetupDiDevicePath, (wcslen(kFakeSetupDiDevicePath) + 1) * sizeof(wchar_t));
+		if (DeviceInfoData && DeviceInfoData->cbSize == sizeof(SP_DEVINFO_DATA))
+		{
+			DeviceInfoData->ClassGuid = KSCATEGORY_AUDIO;
+			DeviceInfoData->DevInst = 0;
+			DeviceInfoData->Reserved = kFakeSetupDiInterfaceTag;
+		}
+
+		SetLastError(ERROR_SUCCESS);
+		rslog::info_ts() << "  -> 1  gle=0  requiredSize=" << requiredBytes << std::endl;
+		rslog::info_ts() << "  devicePath: " << kFakeSetupDiDevicePath << std::endl;
+		return TRUE;
+	}
 
 	BOOL ok = SetupDiGetDeviceInterfaceDetailW(
 		DeviceInfoSet,
@@ -255,6 +406,41 @@ static BOOL WINAPI Patched_SetupDiGetDeviceRegistryPropertyW(
 {
 	rslog::info_ts() << "Patched_SetupDiGetDeviceRegistryPropertyW called - property: " << std::dec << Property << std::endl;
 
+	if (DeviceInfoData && DeviceInfoData->Reserved == kFakeSetupDiInterfaceTag)
+	{
+		BOOL ok = FALSE;
+		switch (Property)
+		{
+			case SPDRP_FRIENDLYNAME:
+				ok = CopyRegSzToBuffer(kFakeSetupDiFriendlyName, PropertyRegDataType, PropertyBuffer, PropertyBufferSize, RequiredSize);
+				break;
+			case SPDRP_DEVICEDESC:
+				ok = CopyRegSzToBuffer(kFakeSetupDiDeviceDesc, PropertyRegDataType, PropertyBuffer, PropertyBufferSize, RequiredSize);
+				break;
+			case SPDRP_MFG:
+				ok = CopyRegSzToBuffer(L"Ubisoft", PropertyRegDataType, PropertyBuffer, PropertyBufferSize, RequiredSize);
+				break;
+			case SPDRP_HARDWAREID:
+				ok = CopyRegMultiSzToBuffer(L"USB\\VID_12BA&PID_00FF", PropertyRegDataType, PropertyBuffer, PropertyBufferSize, RequiredSize);
+				break;
+			case SPDRP_COMPATIBLEIDS:
+				ok = CopyRegMultiSzToBuffer(L"USB\\Class_01", PropertyRegDataType, PropertyBuffer, PropertyBufferSize, RequiredSize);
+				break;
+			default:
+				ok = CopyRegSzToBuffer(kFakeSetupDiRegValue, PropertyRegDataType, PropertyBuffer, PropertyBufferSize, RequiredSize);
+				break;
+		}
+
+		const DWORD gle = GetLastError();
+		rslog::info_ts() << "  -> " << std::dec << ok << "  gle=" << gle;
+		if (PropertyRegDataType)
+			rslog::info_ts() << "  type=" << *PropertyRegDataType;
+		if (RequiredSize)
+			rslog::info_ts() << "  requiredSize=" << *RequiredSize;
+		rslog::info_ts() << std::endl;
+		return ok;
+	}
+
 	BOOL ok = SetupDiGetDeviceRegistryPropertyW(
 		DeviceInfoSet,
 		DeviceInfoData,
@@ -283,13 +469,43 @@ static HKEY WINAPI Patched_SetupDiOpenDeviceInterfaceRegKey(
 {
 	rslog::info_ts() << "Patched_SetupDiOpenDeviceInterfaceRegKey called - samDesired: 0x" << std::hex << samDesired << std::dec << std::endl;
 
+	if (IsFakeSetupDiInterfaceData(DeviceInterfaceData))
+	{
+		HKEY key = nullptr;
+		DWORD ignoredDisposition = 0;
+		LSTATUS status = RegCreateKeyExW(
+			HKEY_CURRENT_USER,
+			L"Software\\RS_ASIO\\FakeRealToneInterface",
+			0,
+			nullptr,
+			REG_OPTION_NON_VOLATILE,
+			KEY_READ | KEY_WRITE,
+			nullptr,
+			&key,
+			&ignoredDisposition);
+
+		if (status == ERROR_SUCCESS && key)
+		{
+			const DWORD bytes = static_cast<DWORD>((wcslen(kFakeSetupDiRegValue) + 1) * sizeof(wchar_t));
+			RegSetValueExW(key, L"DeviceInstance", 0, REG_SZ, reinterpret_cast<const BYTE*>(kFakeSetupDiRegValue), bytes);
+			TrackSetupDiRegKey(key, true, true);
+			SetLastError(ERROR_SUCCESS);
+			rslog::info_ts() << "  -> created fake reg key: " << key << std::endl;
+			return key;
+		}
+
+		SetLastError(status);
+		rslog::info_ts() << "  -> failed to create fake reg key, status=" << std::dec << status << std::endl;
+		return GetInvalidHKeyValue();
+	}
+
 	HKEY key = SetupDiOpenDeviceInterfaceRegKey(DeviceInfoSet, DeviceInterfaceData, Reserved, samDesired);
 	const DWORD gle = GetLastError();
 	rslog::info_ts() << "  -> " << key << "  gle=" << std::dec << gle << std::endl;
 
 	if (key && key != GetInvalidHKeyValue())
 	{
-		TrackSetupDiRegKey(key, true);
+		TrackSetupDiRegKey(key, true, false);
 	}
 
 	return key;
@@ -313,6 +529,7 @@ static LSTATUS WINAPI Patched_RegQueryValueExW(
 	LPDWORD lpcbData)
 {
 	const bool tracked = IsTrackedSetupDiRegKey(hKey);
+	const bool fake = IsFakeSetupDiRegKey(hKey);
 	if (tracked)
 	{
 		rslog::info_ts() << "Patched_RegQueryValueExW (SetupDi key) - value: "
@@ -321,6 +538,32 @@ static LSTATUS WINAPI Patched_RegQueryValueExW(
 	}
 
 	LSTATUS status = RegQueryValueExW(hKey, lpValueName, lpReserved, lpType, lpData, lpcbData);
+
+	if (fake && status != ERROR_SUCCESS)
+	{
+		if (lpType)
+			*lpType = REG_SZ;
+
+		const DWORD requiredBytes = static_cast<DWORD>((wcslen(kFakeSetupDiRegValue) + 1) * sizeof(wchar_t));
+		if (lpcbData)
+		{
+			if (!lpData || *lpcbData < requiredBytes)
+			{
+				*lpcbData = requiredBytes;
+				status = ERROR_MORE_DATA;
+			}
+			else
+			{
+				memcpy(lpData, kFakeSetupDiRegValue, requiredBytes);
+				*lpcbData = requiredBytes;
+				status = ERROR_SUCCESS;
+			}
+		}
+		else
+		{
+			status = ERROR_SUCCESS;
+		}
+	}
 
 	if (tracked)
 	{
@@ -346,7 +589,7 @@ static LSTATUS WINAPI Patched_RegCloseKey(HKEY hKey)
 	LSTATUS status = RegCloseKey(hKey);
 	if (tracked)
 	{
-		TrackSetupDiRegKey(hKey, false);
+		TrackSetupDiRegKey(hKey, false, false);
 		rslog::info_ts() << "  -> status=" << std::dec << status << std::endl;
 	}
 
