@@ -64,6 +64,7 @@ static const wchar_t* kFakeSetupDiDevicePath = L"\\\\?\\USB#VID_12BA&PID_00FF#RS
 static const wchar_t* kFakeSetupDiRegValue = L"USB\\VID_12BA&PID_00FF\\RS_ASIO";
 static const wchar_t* kFakeSetupDiFriendlyName = L"Rocksmith Guitar Adapter Mono";
 static const wchar_t* kFakeSetupDiDeviceDesc = L"Rocksmith USB Guitar Adapter";
+static const bool kEnableSetupDiSynthesis = false;
 
 static HKEY GetInvalidHKeyValue()
 {
@@ -266,9 +267,25 @@ static HDEVINFO WINAPI Patched_SetupDiGetClassDevsA(const GUID* ClassGuid, PCSTR
 		msg << "  enumerator: " << Enumerator;
 	rslog::info_ts() << msg.str() << std::endl;
 
-	HDEVINFO result = SetupDiGetClassDevsA(ClassGuid, Enumerator, hwndParent, Flags);
+	// Wine/Proton may diverge between ANSI and Unicode SetupAPI paths.
+	// Rocksmith calls the ANSI variant, so we normalize to Unicode here while keeping
+	// the real SetupAPI data source and real hardware checks intact.
+	std::wstring enumWide;
+	PCWSTR enumWidePtr = nullptr;
+	if (Enumerator)
+	{
+		const int wlen = MultiByteToWideChar(CP_ACP, 0, Enumerator, -1, nullptr, 0);
+		if (wlen > 0)
+		{
+			enumWide.resize(static_cast<size_t>(wlen));
+			MultiByteToWideChar(CP_ACP, 0, Enumerator, -1, &enumWide[0], wlen);
+			enumWidePtr = enumWide.c_str();
+		}
+	}
+
+	HDEVINFO result = SetupDiGetClassDevsW(ClassGuid, enumWidePtr, hwndParent, Flags);
 	const DWORD gle = GetLastError();
-	rslog::info_ts() << "  -> " << result << "  gle=" << std::dec << gle << std::endl;
+	rslog::info_ts() << "  -> " << result << "  gle=" << std::dec << gle << "  via=SetupDiGetClassDevsW" << std::endl;
 	return result;
 }
 
@@ -288,7 +305,7 @@ static BOOL WINAPI Patched_SetupDiEnumDeviceInterfaces(
 	BOOL ok = SetupDiEnumDeviceInterfaces(DeviceInfoSet, DeviceInfoData, InterfaceClassGuid, MemberIndex, DeviceInterfaceData);
 	const DWORD gle = GetLastError();
 
-	if (!ok && gle == ERROR_NO_MORE_ITEMS && MemberIndex == 0 && IsAudioInterfaceGuid(InterfaceClassGuid))
+	if (kEnableSetupDiSynthesis && !ok && gle == ERROR_NO_MORE_ITEMS && MemberIndex == 0 && IsAudioInterfaceGuid(InterfaceClassGuid))
 	{
 		if (DeviceInterfaceData && DeviceInterfaceData->cbSize == sizeof(SP_DEVICE_INTERFACE_DATA))
 		{
@@ -297,6 +314,12 @@ static BOOL WINAPI Patched_SetupDiEnumDeviceInterfaces(
 			rslog::info_ts() << "  -> synthesized fake KSCATEGORY_AUDIO interface" << std::endl;
 			return TRUE;
 		}
+	}
+
+	if (!ok && gle == ERROR_NO_MORE_ITEMS && MemberIndex == 0 && IsAudioInterfaceGuid(InterfaceClassGuid))
+	{
+		rslog::error_ts() << "SetupDiEnumDeviceInterfaces: no KSCATEGORY_AUDIO interfaces returned."
+		                 << " Rocksmith cable validation will fail under this runtime." << std::endl;
 	}
 
 	rslog::info_ts() << "  -> " << std::dec << ok << "  gle=" << gle << std::endl;
@@ -315,7 +338,7 @@ static BOOL WINAPI Patched_SetupDiGetDeviceInterfaceAlias(
 		msg << "  aliasClassGuid: " << *AliasInterfaceClassGuid;
 	rslog::info_ts() << msg.str() << std::endl;
 
-	if (IsFakeSetupDiInterfaceData(DeviceInterfaceData))
+	if (kEnableSetupDiSynthesis && IsFakeSetupDiInterfaceData(DeviceInterfaceData))
 	{
 		if (AliasDeviceInterfaceData && AliasDeviceInterfaceData->cbSize == sizeof(SP_DEVICE_INTERFACE_DATA))
 		{
@@ -346,7 +369,7 @@ static BOOL WINAPI Patched_SetupDiGetDeviceInterfaceDetailW(
 {
 	rslog::info_ts() << "Patched_SetupDiGetDeviceInterfaceDetailW called - detailSize: " << std::dec << DeviceInterfaceDetailDataSize << std::endl;
 
-	if (IsFakeSetupDiInterfaceData(DeviceInterfaceData))
+	if (kEnableSetupDiSynthesis && IsFakeSetupDiInterfaceData(DeviceInterfaceData))
 	{
 		const DWORD requiredBytes = static_cast<DWORD>(FIELD_OFFSET(SP_DEVICE_INTERFACE_DETAIL_DATA_W, DevicePath) + ((wcslen(kFakeSetupDiDevicePath) + 1) * sizeof(wchar_t)));
 		if (RequiredSize)
@@ -406,7 +429,7 @@ static BOOL WINAPI Patched_SetupDiGetDeviceRegistryPropertyW(
 {
 	rslog::info_ts() << "Patched_SetupDiGetDeviceRegistryPropertyW called - property: " << std::dec << Property << std::endl;
 
-	if (DeviceInfoData && DeviceInfoData->Reserved == kFakeSetupDiInterfaceTag)
+	if (kEnableSetupDiSynthesis && DeviceInfoData && DeviceInfoData->Reserved == kFakeSetupDiInterfaceTag)
 	{
 		BOOL ok = FALSE;
 		switch (Property)
@@ -469,7 +492,7 @@ static HKEY WINAPI Patched_SetupDiOpenDeviceInterfaceRegKey(
 {
 	rslog::info_ts() << "Patched_SetupDiOpenDeviceInterfaceRegKey called - samDesired: 0x" << std::hex << samDesired << std::dec << std::endl;
 
-	if (IsFakeSetupDiInterfaceData(DeviceInterfaceData))
+	if (kEnableSetupDiSynthesis && IsFakeSetupDiInterfaceData(DeviceInterfaceData))
 	{
 		HKEY key = nullptr;
 		DWORD ignoredDisposition = 0;
@@ -539,7 +562,7 @@ static LSTATUS WINAPI Patched_RegQueryValueExW(
 
 	LSTATUS status = RegQueryValueExW(hKey, lpValueName, lpReserved, lpType, lpData, lpcbData);
 
-	if (fake && status != ERROR_SUCCESS)
+	if (kEnableSetupDiSynthesis && fake && status != ERROR_SUCCESS)
 	{
 		if (lpType)
 			*lpType = REG_SZ;
