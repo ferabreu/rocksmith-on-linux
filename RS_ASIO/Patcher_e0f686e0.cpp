@@ -66,6 +66,15 @@ static const wchar_t* kFakeSetupDiFriendlyName = L"Rocksmith Guitar Adapter Mono
 static const wchar_t* kFakeSetupDiDeviceDesc = L"Rocksmith USB Guitar Adapter";
 static const bool kEnableSetupDiSynthesis = false;
 
+struct RealCaptureFallbackToken
+{
+	SP_DEVICE_INTERFACE_DATA captureInterfaceData{};
+};
+
+static std::mutex g_setupDiCaptureFallbackMutex;
+static HDEVINFO g_captureInterfaceInfoSet = INVALID_HANDLE_VALUE;
+static std::set<RealCaptureFallbackToken*> g_captureFallbackTokens;
+
 static HKEY GetInvalidHKeyValue()
 {
 	return reinterpret_cast<HKEY>(INVALID_HANDLE_VALUE);
@@ -174,6 +183,54 @@ static bool IsFakeSetupDiRegKey(HKEY key)
 	return g_fakeSetupDiRegKeys.find(key) != g_fakeSetupDiRegKeys.end();
 }
 
+static HDEVINFO EnsureCaptureInterfaceInfoSet()
+{
+	std::lock_guard<std::mutex> g(g_setupDiCaptureFallbackMutex);
+	if (g_captureInterfaceInfoSet == INVALID_HANDLE_VALUE)
+	{
+		g_captureInterfaceInfoSet = SetupDiGetClassDevsW(&KSCATEGORY_CAPTURE, nullptr, nullptr, DIGCF_PRESENT | DIGCF_DEVICEINTERFACE);
+	}
+	return g_captureInterfaceInfoSet;
+}
+
+static RealCaptureFallbackToken* CreateCaptureFallbackToken(const SP_DEVICE_INTERFACE_DATA& captureInterfaceData)
+{
+	auto* token = new RealCaptureFallbackToken();
+	token->captureInterfaceData = captureInterfaceData;
+
+	std::lock_guard<std::mutex> g(g_setupDiCaptureFallbackMutex);
+	g_captureFallbackTokens.insert(token);
+	return token;
+}
+
+static RealCaptureFallbackToken* GetCaptureFallbackToken(const SP_DEVICE_INTERFACE_DATA* interfaceData)
+{
+	if (!interfaceData || !interfaceData->Reserved)
+		return nullptr;
+
+	auto* token = reinterpret_cast<RealCaptureFallbackToken*>(interfaceData->Reserved);
+	std::lock_guard<std::mutex> g(g_setupDiCaptureFallbackMutex);
+	auto it = g_captureFallbackTokens.find(token);
+	if (it == g_captureFallbackTokens.end())
+		return nullptr;
+
+	return *it;
+}
+
+static void ClearCaptureFallbackState()
+{
+	std::lock_guard<std::mutex> g(g_setupDiCaptureFallbackMutex);
+	for (auto* token : g_captureFallbackTokens)
+		delete token;
+	g_captureFallbackTokens.clear();
+
+	if (g_captureInterfaceInfoSet != INVALID_HANDLE_VALUE)
+	{
+		SetupDiDestroyDeviceInfoList(g_captureInterfaceInfoSet);
+		g_captureInterfaceInfoSet = INVALID_HANDLE_VALUE;
+	}
+}
+
 // Patch a single IAT slot to point to replacementFn.
 // Patch_ReplaceWithBytes (from Patcher.h) handles page protection internally
 // via NtProtectVirtualMemory, bypassing any hook on VirtualProtect.
@@ -267,6 +324,11 @@ static HDEVINFO WINAPI Patched_SetupDiGetClassDevsA(const GUID* ClassGuid, PCSTR
 		msg << "  enumerator: " << Enumerator;
 	rslog::info_ts() << msg.str() << std::endl;
 
+	if (IsAudioInterfaceGuid(ClassGuid))
+	{
+		ClearCaptureFallbackState();
+	}
+
 	// Wine/Proton may diverge between ANSI and Unicode SetupAPI paths.
 	// Rocksmith calls the ANSI variant, so we normalize to Unicode here while keeping
 	// the real SetupAPI data source and real hardware checks intact.
@@ -316,10 +378,43 @@ static BOOL WINAPI Patched_SetupDiEnumDeviceInterfaces(
 		}
 	}
 
-	if (!ok && gle == ERROR_NO_MORE_ITEMS && MemberIndex == 0 && IsAudioInterfaceGuid(InterfaceClassGuid))
+	if (!ok && gle == ERROR_NO_MORE_ITEMS && IsAudioInterfaceGuid(InterfaceClassGuid))
 	{
-		rslog::error_ts() << "SetupDiEnumDeviceInterfaces: no KSCATEGORY_AUDIO interfaces returned."
-		                 << " Rocksmith cable validation will fail under this runtime." << std::endl;
+		HDEVINFO captureSet = EnsureCaptureInterfaceInfoSet();
+		if (captureSet != INVALID_HANDLE_VALUE)
+		{
+			SP_DEVICE_INTERFACE_DATA captureInterfaceData{};
+			captureInterfaceData.cbSize = sizeof(SP_DEVICE_INTERFACE_DATA);
+			if (SetupDiEnumDeviceInterfaces(captureSet, nullptr, &KSCATEGORY_CAPTURE, MemberIndex, &captureInterfaceData))
+			{
+				if (DeviceInterfaceData && DeviceInterfaceData->cbSize == sizeof(SP_DEVICE_INTERFACE_DATA))
+				{
+					auto* token = CreateCaptureFallbackToken(captureInterfaceData);
+					DeviceInterfaceData->cbSize = sizeof(SP_DEVICE_INTERFACE_DATA);
+					DeviceInterfaceData->InterfaceClassGuid = InterfaceClassGuid ? *InterfaceClassGuid : KSCATEGORY_AUDIO;
+					DeviceInterfaceData->Flags = captureInterfaceData.Flags;
+					DeviceInterfaceData->Reserved = reinterpret_cast<ULONG_PTR>(token);
+					SetLastError(ERROR_SUCCESS);
+					rslog::info_ts() << "  -> fallback to real KSCATEGORY_CAPTURE interface" << std::endl;
+					return TRUE;
+				}
+			}
+
+			const DWORD captureErr = GetLastError();
+			if (MemberIndex == 0)
+			{
+				rslog::error_ts() << "SetupDiEnumDeviceInterfaces: no KSCATEGORY_AUDIO interfaces returned."
+				                 << " capture-fallback failed with gle=" << captureErr
+				                 << ". Rocksmith cable validation will fail under this runtime." << std::endl;
+			}
+		}
+		else if (MemberIndex == 0)
+		{
+			const DWORD captureSetErr = GetLastError();
+			rslog::error_ts() << "SetupDiEnumDeviceInterfaces: no KSCATEGORY_AUDIO interfaces returned."
+			                 << " capture-fallback could not acquire capture set, gle=" << captureSetErr
+			                 << ". Rocksmith cable validation will fail under this runtime." << std::endl;
+		}
 	}
 
 	rslog::info_ts() << "  -> " << std::dec << ok << "  gle=" << gle << std::endl;
@@ -337,6 +432,36 @@ static BOOL WINAPI Patched_SetupDiGetDeviceInterfaceAlias(
 	if (AliasInterfaceClassGuid)
 		msg << "  aliasClassGuid: " << *AliasInterfaceClassGuid;
 	rslog::info_ts() << msg.str() << std::endl;
+
+	if (auto* captureToken = GetCaptureFallbackToken(DeviceInterfaceData))
+	{
+		HDEVINFO captureSet = EnsureCaptureInterfaceInfoSet();
+		if (captureSet != INVALID_HANDLE_VALUE)
+		{
+			BOOL aliasOk = SetupDiGetDeviceInterfaceAlias(captureSet, &captureToken->captureInterfaceData, AliasInterfaceClassGuid, AliasDeviceInterfaceData);
+			const DWORD aliasErr = GetLastError();
+			if (aliasOk)
+			{
+				rslog::info_ts() << "  -> 1  gle=0  via=real-capture-fallback" << std::endl;
+				return TRUE;
+			}
+
+			if (AliasInterfaceClassGuid && IsEqualGUID(*AliasInterfaceClassGuid, KSCATEGORY_CAPTURE) &&
+				AliasDeviceInterfaceData && AliasDeviceInterfaceData->cbSize == sizeof(SP_DEVICE_INTERFACE_DATA))
+			{
+				AliasDeviceInterfaceData->cbSize = sizeof(SP_DEVICE_INTERFACE_DATA);
+				AliasDeviceInterfaceData->InterfaceClassGuid = *AliasInterfaceClassGuid;
+				AliasDeviceInterfaceData->Flags = captureToken->captureInterfaceData.Flags;
+				AliasDeviceInterfaceData->Reserved = reinterpret_cast<ULONG_PTR>(captureToken);
+				SetLastError(ERROR_SUCCESS);
+				rslog::info_ts() << "  -> 1  gle=0  via=real-capture-self-alias" << std::endl;
+				return TRUE;
+			}
+
+			rslog::info_ts() << "  -> 0  gle=" << std::dec << aliasErr << "  via=real-capture-fallback" << std::endl;
+			return FALSE;
+		}
+	}
 
 	if (kEnableSetupDiSynthesis && IsFakeSetupDiInterfaceData(DeviceInterfaceData))
 	{
@@ -368,6 +493,34 @@ static BOOL WINAPI Patched_SetupDiGetDeviceInterfaceDetailW(
 	PSP_DEVINFO_DATA DeviceInfoData)
 {
 	rslog::info_ts() << "Patched_SetupDiGetDeviceInterfaceDetailW called - detailSize: " << std::dec << DeviceInterfaceDetailDataSize << std::endl;
+
+	if (auto* captureToken = GetCaptureFallbackToken(DeviceInterfaceData))
+	{
+		HDEVINFO captureSet = EnsureCaptureInterfaceInfoSet();
+		if (captureSet != INVALID_HANDLE_VALUE)
+		{
+			BOOL okCapture = SetupDiGetDeviceInterfaceDetailW(
+				captureSet,
+				&captureToken->captureInterfaceData,
+				DeviceInterfaceDetailData,
+				DeviceInterfaceDetailDataSize,
+				RequiredSize,
+				DeviceInfoData);
+
+			const DWORD gleCapture = GetLastError();
+			rslog::info_ts() << "  -> " << std::dec << okCapture << "  gle=" << gleCapture << "  via=real-capture-fallback";
+			if (RequiredSize)
+				rslog::info_ts() << "  requiredSize=" << *RequiredSize;
+			rslog::info_ts() << std::endl;
+
+			if (okCapture && DeviceInterfaceDetailData)
+			{
+				rslog::info_ts() << "  devicePath: " << DeviceInterfaceDetailData->DevicePath << std::endl;
+			}
+
+			return okCapture;
+		}
+	}
 
 	if (kEnableSetupDiSynthesis && IsFakeSetupDiInterfaceData(DeviceInterfaceData))
 	{
@@ -492,6 +645,22 @@ static HKEY WINAPI Patched_SetupDiOpenDeviceInterfaceRegKey(
 {
 	rslog::info_ts() << "Patched_SetupDiOpenDeviceInterfaceRegKey called - samDesired: 0x" << std::hex << samDesired << std::dec << std::endl;
 
+	if (auto* captureToken = GetCaptureFallbackToken(DeviceInterfaceData))
+	{
+		HDEVINFO captureSet = EnsureCaptureInterfaceInfoSet();
+		if (captureSet != INVALID_HANDLE_VALUE)
+		{
+			HKEY key = SetupDiOpenDeviceInterfaceRegKey(captureSet, &captureToken->captureInterfaceData, Reserved, samDesired);
+			const DWORD gle = GetLastError();
+			rslog::info_ts() << "  -> " << key << "  gle=" << std::dec << gle << "  via=real-capture-fallback" << std::endl;
+			if (key && key != GetInvalidHKeyValue())
+			{
+				TrackSetupDiRegKey(key, true, false);
+			}
+			return key;
+		}
+	}
+
 	if (kEnableSetupDiSynthesis && IsFakeSetupDiInterfaceData(DeviceInterfaceData))
 	{
 		HKEY key = nullptr;
@@ -539,6 +708,7 @@ static BOOL WINAPI Patched_SetupDiDestroyDeviceInfoList(HDEVINFO DeviceInfoSet)
 	rslog::info_ts() << "Patched_SetupDiDestroyDeviceInfoList called" << std::endl;
 	BOOL ok = SetupDiDestroyDeviceInfoList(DeviceInfoSet);
 	const DWORD gle = GetLastError();
+	ClearCaptureFallbackState();
 	rslog::info_ts() << "  -> " << std::dec << ok << "  gle=" << gle << std::endl;
 	return ok;
 }
