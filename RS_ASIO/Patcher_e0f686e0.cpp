@@ -435,32 +435,20 @@ static BOOL WINAPI Patched_SetupDiGetDeviceInterfaceAlias(
 
 	if (auto* captureToken = GetCaptureFallbackToken(DeviceInterfaceData))
 	{
-		HDEVINFO captureSet = EnsureCaptureInterfaceInfoSet();
-		if (captureSet != INVALID_HANDLE_VALUE)
+		if (AliasInterfaceClassGuid && AliasDeviceInterfaceData && AliasDeviceInterfaceData->cbSize == sizeof(SP_DEVICE_INTERFACE_DATA))
 		{
-			BOOL aliasOk = SetupDiGetDeviceInterfaceAlias(captureSet, &captureToken->captureInterfaceData, AliasInterfaceClassGuid, AliasDeviceInterfaceData);
-			const DWORD aliasErr = GetLastError();
-			if (aliasOk)
-			{
-				rslog::info_ts() << "  -> 1  gle=0  via=real-capture-fallback" << std::endl;
-				return TRUE;
-			}
-
-			if (AliasInterfaceClassGuid && IsEqualGUID(*AliasInterfaceClassGuid, KSCATEGORY_CAPTURE) &&
-				AliasDeviceInterfaceData && AliasDeviceInterfaceData->cbSize == sizeof(SP_DEVICE_INTERFACE_DATA))
-			{
-				AliasDeviceInterfaceData->cbSize = sizeof(SP_DEVICE_INTERFACE_DATA);
-				AliasDeviceInterfaceData->InterfaceClassGuid = *AliasInterfaceClassGuid;
-				AliasDeviceInterfaceData->Flags = captureToken->captureInterfaceData.Flags;
-				AliasDeviceInterfaceData->Reserved = reinterpret_cast<ULONG_PTR>(captureToken);
-				SetLastError(ERROR_SUCCESS);
-				rslog::info_ts() << "  -> 1  gle=0  via=real-capture-self-alias" << std::endl;
-				return TRUE;
-			}
-
-			rslog::info_ts() << "  -> 0  gle=" << std::dec << aliasErr << "  via=real-capture-fallback" << std::endl;
-			return FALSE;
+			AliasDeviceInterfaceData->cbSize = sizeof(SP_DEVICE_INTERFACE_DATA);
+			AliasDeviceInterfaceData->InterfaceClassGuid = *AliasInterfaceClassGuid;
+			AliasDeviceInterfaceData->Flags = captureToken->captureInterfaceData.Flags;
+			AliasDeviceInterfaceData->Reserved = reinterpret_cast<ULONG_PTR>(captureToken);
+			SetLastError(ERROR_SUCCESS);
+			rslog::info_ts() << "  -> 1  gle=0  via=real-capture-self-alias" << std::endl;
+			return TRUE;
 		}
+
+		SetLastError(ERROR_INVALID_USER_BUFFER);
+		rslog::info_ts() << "  -> 0  gle=" << std::dec << ERROR_INVALID_USER_BUFFER << "  via=real-capture-self-alias" << std::endl;
+		return FALSE;
 	}
 
 	if (kEnableSetupDiSynthesis && IsFakeSetupDiInterfaceData(DeviceInterfaceData))
@@ -478,10 +466,30 @@ static BOOL WINAPI Patched_SetupDiGetDeviceInterfaceAlias(
 		return FALSE;
 	}
 
-	BOOL ok = SetupDiGetDeviceInterfaceAlias(DeviceInfoSet, DeviceInterfaceData, AliasInterfaceClassGuid, AliasDeviceInterfaceData);
-	const DWORD gle = GetLastError();
-	rslog::info_ts() << "  -> " << std::dec << ok << "  gle=" << gle << std::endl;
-	return ok;
+	if (!AliasInterfaceClassGuid || !DeviceInterfaceData)
+	{
+		SetLastError(ERROR_INVALID_PARAMETER);
+		rslog::info_ts() << "  -> 0  gle=" << std::dec << ERROR_INVALID_PARAMETER << std::endl;
+		return FALSE;
+	}
+
+	if (!AliasDeviceInterfaceData || AliasDeviceInterfaceData->cbSize != sizeof(SP_DEVICE_INTERFACE_DATA))
+	{
+		SetLastError(ERROR_INVALID_USER_BUFFER);
+		rslog::info_ts() << "  -> 0  gle=" << std::dec << ERROR_INVALID_USER_BUFFER << std::endl;
+		return FALSE;
+	}
+
+	// Some Wine/Proton builds expose SetupDiGetDeviceInterfaceAlias as an unimplemented
+	// stub that aborts the process. For Rocksmith's validation flow, a pass-through alias
+	// is sufficient and avoids hard runtime crashes.
+	AliasDeviceInterfaceData->cbSize = sizeof(SP_DEVICE_INTERFACE_DATA);
+	AliasDeviceInterfaceData->InterfaceClassGuid = *AliasInterfaceClassGuid;
+	AliasDeviceInterfaceData->Flags = DeviceInterfaceData->Flags;
+	AliasDeviceInterfaceData->Reserved = DeviceInterfaceData->Reserved;
+	SetLastError(ERROR_SUCCESS);
+	rslog::info_ts() << "  -> 1  gle=0  via=pass-through-alias" << std::endl;
+	return TRUE;
 }
 
 static BOOL WINAPI Patched_SetupDiGetDeviceInterfaceDetailW(
