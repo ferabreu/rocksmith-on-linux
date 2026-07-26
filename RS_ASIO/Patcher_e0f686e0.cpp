@@ -63,8 +63,9 @@ static std::set<HKEY> g_fakeSetupDiRegKeys;
 static const ULONG_PTR kFakeSetupDiInterfaceTag = 0x52534149; // "RSAI"
 static const wchar_t* kFakeSetupDiDevicePath = L"\\\\?\\USB#VID_12BA&PID_00FF#RS_ASIO#{6994ad04-93ef-11d0-a3cc-00a0c9223196}";
 static const wchar_t* kFakeSetupDiRegValue = L"USB\\VID_12BA&PID_00FF\\RS_ASIO";
-static const wchar_t* kFakeSetupDiFriendlyName = L"Rocksmith Guitar Adapter Mono";
+static const wchar_t* kFakeSetupDiFriendlyName = L"Rocksmith USB Guitar Adapter";
 static const wchar_t* kFakeSetupDiDeviceDesc = L"Rocksmith USB Guitar Adapter";
+static const wchar_t* kFakeSetupDiHardwareId = L"USB\\VID_12BA&PID_00FF";
 static const bool kEnableSetupDiSynthesis = true;
 static const bool kRequireRocksmithCaptureEndpointForSynthesis = true;
 
@@ -264,6 +265,37 @@ static BOOL CopyRegMultiSzToBuffer(const wchar_t* value, PDWORD outType, PBYTE o
 
 	SetLastError(ERROR_SUCCESS);
 	return TRUE;
+}
+
+static void UpsertFakeRegSz(HKEY key, const wchar_t* valueName, const wchar_t* value)
+{
+	if (!key || key == GetInvalidHKeyValue())
+		return;
+
+	if (!value)
+		value = L"";
+
+	const DWORD bytes = static_cast<DWORD>((wcslen(value) + 1) * sizeof(wchar_t));
+	RegSetValueExW(key, valueName, 0, REG_SZ, reinterpret_cast<const BYTE*>(value), bytes);
+}
+
+static void UpsertFakeRegMultiSz(HKEY key, const wchar_t* valueName, const wchar_t* value)
+{
+	if (!key || key == GetInvalidHKeyValue())
+		return;
+
+	if (!value)
+		value = L"";
+
+	const size_t valueChars = wcslen(value);
+	const DWORD bytes = static_cast<DWORD>((valueChars + 2) * sizeof(wchar_t));
+	std::vector<wchar_t> multi;
+	multi.resize(valueChars + 2);
+	memcpy(multi.data(), value, valueChars * sizeof(wchar_t));
+	multi[valueChars] = L'\0';
+	multi[valueChars + 1] = L'\0';
+
+	RegSetValueExW(key, valueName, 0, REG_MULTI_SZ, reinterpret_cast<const BYTE*>(multi.data()), bytes);
 }
 
 static void TrackSetupDiRegKey(HKEY key, bool track, bool isFake)
@@ -808,8 +840,13 @@ static HKEY WINAPI Patched_SetupDiOpenDeviceInterfaceRegKey(
 
 		if (status == ERROR_SUCCESS && key)
 		{
-			const DWORD bytes = static_cast<DWORD>((wcslen(kFakeSetupDiRegValue) + 1) * sizeof(wchar_t));
-			RegSetValueExW(key, L"DeviceInstance", 0, REG_SZ, reinterpret_cast<const BYTE*>(kFakeSetupDiRegValue), bytes);
+			// Keep these values stable across runs so Rocksmith's cable validation sees
+			// recognizable identifiers even when SetupAPI KSCATEGORY_AUDIO is missing.
+			UpsertFakeRegSz(key, L"FriendlyName", kFakeSetupDiFriendlyName);
+			UpsertFakeRegSz(key, L"DeviceDesc", kFakeSetupDiDeviceDesc);
+			UpsertFakeRegSz(key, L"DeviceInstance", kFakeSetupDiRegValue);
+			UpsertFakeRegSz(key, L"MatchingDeviceId", kFakeSetupDiHardwareId);
+			UpsertFakeRegMultiSz(key, L"HardwareID", kFakeSetupDiHardwareId);
 			TrackSetupDiRegKey(key, true, true);
 			SetLastError(ERROR_SUCCESS);
 			rslog::info_ts() << "  -> created fake reg key: " << key << std::endl;
@@ -864,28 +901,82 @@ static LSTATUS WINAPI Patched_RegQueryValueExW(
 
 	if (kEnableSetupDiSynthesis && fake && status != ERROR_SUCCESS)
 	{
-		if (lpType)
-			*lpType = REG_SZ;
+		std::wstring keyNameLower = ToLowerCopy(lpValueName ? lpValueName : L"");
 
-		const DWORD requiredBytes = static_cast<DWORD>((wcslen(kFakeSetupDiRegValue) + 1) * sizeof(wchar_t));
-		if (lpcbData)
+		auto writeRegSz = [&](const wchar_t* value)
 		{
-			if (!lpData || *lpcbData < requiredBytes)
+			if (!value)
+				value = L"";
+
+			if (lpType)
+				*lpType = REG_SZ;
+
+			const DWORD requiredBytes = static_cast<DWORD>((wcslen(value) + 1) * sizeof(wchar_t));
+			if (lpcbData)
 			{
-				*lpcbData = requiredBytes;
-				status = ERROR_MORE_DATA;
+				if (!lpData || *lpcbData < requiredBytes)
+				{
+					*lpcbData = requiredBytes;
+					status = ERROR_MORE_DATA;
+				}
+				else
+				{
+					memcpy(lpData, value, requiredBytes);
+					*lpcbData = requiredBytes;
+					status = ERROR_SUCCESS;
+				}
 			}
 			else
 			{
-				memcpy(lpData, kFakeSetupDiRegValue, requiredBytes);
-				*lpcbData = requiredBytes;
 				status = ERROR_SUCCESS;
 			}
-		}
-		else
+		};
+
+		auto writeRegMultiSz = [&](const wchar_t* value)
 		{
-			status = ERROR_SUCCESS;
-		}
+			if (!value)
+				value = L"";
+
+			if (lpType)
+				*lpType = REG_MULTI_SZ;
+
+			const size_t valueChars = wcslen(value);
+			const DWORD requiredBytes = static_cast<DWORD>((valueChars + 2) * sizeof(wchar_t));
+			if (lpcbData)
+			{
+				if (!lpData || *lpcbData < requiredBytes)
+				{
+					*lpcbData = requiredBytes;
+					status = ERROR_MORE_DATA;
+				}
+				else
+				{
+					wchar_t* out = reinterpret_cast<wchar_t*>(lpData);
+					memcpy(out, value, valueChars * sizeof(wchar_t));
+					out[valueChars] = L'\0';
+					out[valueChars + 1] = L'\0';
+					*lpcbData = requiredBytes;
+					status = ERROR_SUCCESS;
+				}
+			}
+			else
+			{
+				status = ERROR_SUCCESS;
+			}
+		};
+
+		if (keyNameLower == L"friendlyname")
+			writeRegSz(kFakeSetupDiFriendlyName);
+		else if (keyNameLower == L"devicedesc")
+			writeRegSz(kFakeSetupDiDeviceDesc);
+		else if (keyNameLower == L"deviceinstance")
+			writeRegSz(kFakeSetupDiRegValue);
+		else if (keyNameLower == L"matchingdeviceid")
+			writeRegSz(kFakeSetupDiHardwareId);
+		else if (keyNameLower == L"hardwareid")
+			writeRegMultiSz(kFakeSetupDiHardwareId);
+		else
+			writeRegSz(kFakeSetupDiRegValue);
 	}
 
 	if (tracked)
@@ -895,6 +986,20 @@ static LSTATUS WINAPI Patched_RegQueryValueExW(
 			rslog::info_ts() << " type=" << *lpType;
 		if (lpcbData)
 			rslog::info_ts() << " size=" << *lpcbData;
+
+		if (status == ERROR_SUCCESS && lpType && lpData)
+		{
+			if (*lpType == REG_SZ)
+			{
+				rslog::info_ts() << " value=\"" << reinterpret_cast<const wchar_t*>(lpData) << "\"";
+			}
+			else if (*lpType == REG_MULTI_SZ)
+			{
+				const wchar_t* p = reinterpret_cast<const wchar_t*>(lpData);
+				if (p && *p)
+					rslog::info_ts() << " value=\"" << p << "\"";
+			}
+		}
 		rslog::info_ts() << std::endl;
 	}
 
