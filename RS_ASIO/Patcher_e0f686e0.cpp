@@ -3,6 +3,7 @@
 #include "Patcher.h"
 #include <cstring>
 #include <cwchar>
+#include <cwctype>
 #include <sstream>
 #include <setupapi.h>
 
@@ -64,7 +65,8 @@ static const wchar_t* kFakeSetupDiDevicePath = L"\\\\?\\USB#VID_12BA&PID_00FF#RS
 static const wchar_t* kFakeSetupDiRegValue = L"USB\\VID_12BA&PID_00FF\\RS_ASIO";
 static const wchar_t* kFakeSetupDiFriendlyName = L"Rocksmith Guitar Adapter Mono";
 static const wchar_t* kFakeSetupDiDeviceDesc = L"Rocksmith USB Guitar Adapter";
-static const bool kEnableSetupDiSynthesis = false;
+static const bool kEnableSetupDiSynthesis = true;
+static const bool kRequireRocksmithCaptureEndpointForSynthesis = true;
 
 struct RealCaptureFallbackToken
 {
@@ -74,6 +76,8 @@ struct RealCaptureFallbackToken
 static std::mutex g_setupDiCaptureFallbackMutex;
 static HDEVINFO g_captureInterfaceInfoSet = INVALID_HANDLE_VALUE;
 static std::set<RealCaptureFallbackToken*> g_captureFallbackTokens;
+static std::mutex g_synthesisProbeMutex;
+static std::optional<bool> g_synthesisProbeCachedResult;
 
 static HKEY GetInvalidHKeyValue()
 {
@@ -88,6 +92,116 @@ static bool IsAudioInterfaceGuid(const GUID* guid)
 static bool IsFakeSetupDiInterfaceData(const SP_DEVICE_INTERFACE_DATA* interfaceData)
 {
 	return interfaceData && interfaceData->Reserved == kFakeSetupDiInterfaceTag;
+}
+
+static std::wstring ToLowerCopy(const wchar_t* text)
+{
+	if (!text)
+		return std::wstring();
+
+	std::wstring out(text);
+	std::transform(out.begin(), out.end(), out.begin(), [](wchar_t ch)
+	{
+		return static_cast<wchar_t>(std::towlower(static_cast<wint_t>(ch)));
+	});
+
+	return out;
+}
+
+static bool HasRocksmithCaptureEndpoint()
+{
+	std::lock_guard<std::mutex> g(g_synthesisProbeMutex);
+	if (g_synthesisProbeCachedResult.has_value())
+	{
+		return *g_synthesisProbeCachedResult;
+	}
+
+	IMMDeviceEnumerator* enumerator = nullptr;
+	HRESULT hr = CoCreateInstance(
+		__uuidof(MMDeviceEnumerator),
+		nullptr,
+		CLSCTX_INPROC_SERVER,
+		IID_PPV_ARGS(&enumerator));
+
+	if (FAILED(hr) || !enumerator)
+	{
+		rslog::info_ts() << "SetupDi synthesis probe: failed to create MMDeviceEnumerator hr=" << HResultToStr(hr) << std::endl;
+		g_synthesisProbeCachedResult = false;
+		return false;
+	}
+
+	IMMDeviceCollection* devices = nullptr;
+	hr = enumerator->EnumAudioEndpoints(eCapture, DEVICE_STATE_ACTIVE, &devices);
+	enumerator->Release();
+	enumerator = nullptr;
+
+	if (FAILED(hr) || !devices)
+	{
+		rslog::info_ts() << "SetupDi synthesis probe: EnumAudioEndpoints failed hr=" << HResultToStr(hr) << std::endl;
+		g_synthesisProbeCachedResult = false;
+		return false;
+	}
+
+	UINT count = 0;
+	devices->GetCount(&count);
+
+	bool found = false;
+	for (UINT i = 0; i < count && !found; ++i)
+	{
+		IMMDevice* dev = nullptr;
+		if (FAILED(devices->Item(i, &dev)) || !dev)
+			continue;
+
+		std::wstring lowerId;
+		LPWSTR id = nullptr;
+		if (SUCCEEDED(dev->GetId(&id)) && id)
+		{
+			lowerId = ToLowerCopy(id);
+			CoTaskMemFree(id);
+			id = nullptr;
+		}
+
+		std::wstring lowerFriendlyName;
+		IPropertyStore* store = nullptr;
+		if (SUCCEEDED(dev->OpenPropertyStore(STGM_READ, &store)) && store)
+		{
+			PROPVARIANT pv;
+			PropVariantInit(&pv);
+			if (SUCCEEDED(store->GetValue(PKEY_Device_FriendlyName, &pv)) && pv.vt == VT_LPWSTR && pv.pwszVal)
+			{
+				lowerFriendlyName = ToLowerCopy(pv.pwszVal);
+			}
+			PropVariantClear(&pv);
+			store->Release();
+		}
+
+		dev->Release();
+
+		if (lowerFriendlyName.find(L"rocksmith") != std::wstring::npos ||
+			lowerFriendlyName.find(L"guitar adapter") != std::wstring::npos ||
+			lowerId.find(L"rocksmith") != std::wstring::npos ||
+			lowerId.find(L"vid_12ba") != std::wstring::npos)
+		{
+			found = true;
+		}
+	}
+
+	devices->Release();
+
+	g_synthesisProbeCachedResult = found;
+	rslog::info_ts() << "SetupDi synthesis probe: rocksmith endpoint present=" << (found ? 1 : 0) << std::endl;
+	return found;
+}
+
+static bool ShouldAllowSetupDiSynthesis()
+{
+	if (!kEnableSetupDiSynthesis)
+		return false;
+
+	if (!kRequireRocksmithCaptureEndpointForSynthesis)
+		return true;
+
+	return HasRocksmithCaptureEndpoint();
 }
 
 static void FillFakeSetupDiInterfaceData(PSP_DEVICE_INTERFACE_DATA interfaceData, const GUID* interfaceClassGuid)
@@ -367,7 +481,10 @@ static BOOL WINAPI Patched_SetupDiEnumDeviceInterfaces(
 	BOOL ok = SetupDiEnumDeviceInterfaces(DeviceInfoSet, DeviceInfoData, InterfaceClassGuid, MemberIndex, DeviceInterfaceData);
 	const DWORD gle = GetLastError();
 
-	if (kEnableSetupDiSynthesis && !ok && gle == ERROR_NO_MORE_ITEMS && MemberIndex == 0 && IsAudioInterfaceGuid(InterfaceClassGuid))
+	const bool noAudioInterfaceAtStart = (!ok && gle == ERROR_NO_MORE_ITEMS && MemberIndex == 0 && IsAudioInterfaceGuid(InterfaceClassGuid));
+	const bool allowSynthesis = noAudioInterfaceAtStart ? ShouldAllowSetupDiSynthesis() : false;
+
+	if (allowSynthesis && noAudioInterfaceAtStart)
 	{
 		if (DeviceInterfaceData && DeviceInterfaceData->cbSize == sizeof(SP_DEVICE_INTERFACE_DATA))
 		{
@@ -380,6 +497,11 @@ static BOOL WINAPI Patched_SetupDiEnumDeviceInterfaces(
 
 	if (!ok && gle == ERROR_NO_MORE_ITEMS && IsAudioInterfaceGuid(InterfaceClassGuid))
 	{
+		if (MemberIndex == 0 && !allowSynthesis)
+		{
+			rslog::info_ts() << "SetupDi synthesis disabled for this run (no Rocksmith capture endpoint probe match)." << std::endl;
+		}
+
 		HDEVINFO captureSet = EnsureCaptureInterfaceInfoSet();
 		if (captureSet != INVALID_HANDLE_VALUE)
 		{
