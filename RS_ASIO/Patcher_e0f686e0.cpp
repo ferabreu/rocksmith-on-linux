@@ -95,6 +95,44 @@ static bool IsFakeSetupDiInterfaceData(const SP_DEVICE_INTERFACE_DATA* interface
 	return interfaceData && interfaceData->Reserved == kFakeSetupDiInterfaceTag;
 }
 
+static std::wstring GuidToLowerBraceString(const GUID& guid)
+{
+	wchar_t guidBuf[64] = {};
+	if (!StringFromGUID2(guid, guidBuf, static_cast<int>(sizeof(guidBuf) / sizeof(guidBuf[0]))))
+		return L"{6994ad04-93ef-11d0-a3cc-00a0c9223196}";
+
+	std::wstring out(guidBuf);
+	std::transform(out.begin(), out.end(), out.begin(), [](wchar_t ch)
+	{
+		return static_cast<wchar_t>(std::towlower(static_cast<wint_t>(ch)));
+	});
+
+	return out;
+}
+
+static std::wstring BuildFakeSetupDiDevicePath(const GUID& classGuid)
+{
+	std::wstring out = L"\\\\?\\USB#VID_12BA&PID_00FF#RS_ASIO#";
+	out += GuidToLowerBraceString(classGuid);
+	return out;
+}
+
+static bool ShouldSucceedFakeAlias(const GUID* aliasGuid)
+{
+	if (!aliasGuid)
+		return false;
+
+	// The cable is capture-only. Claiming render aliases can cause games to reject
+	// the endpoint during capability checks.
+	if (IsEqualGUID(*aliasGuid, KSCATEGORY_CAPTURE))
+		return true;
+
+	if (IsEqualGUID(*aliasGuid, KSCATEGORY_AUDIO))
+		return true;
+
+	return false;
+}
+
 static std::wstring ToLowerCopy(const wchar_t* text)
 {
 	if (!text)
@@ -609,6 +647,13 @@ static BOOL WINAPI Patched_SetupDiGetDeviceInterfaceAlias(
 	{
 		if (AliasDeviceInterfaceData && AliasDeviceInterfaceData->cbSize == sizeof(SP_DEVICE_INTERFACE_DATA))
 		{
+			if (!ShouldSucceedFakeAlias(AliasInterfaceClassGuid))
+			{
+				SetLastError(ERROR_NOT_FOUND);
+				rslog::info_ts() << "  -> 0  gle=" << std::dec << ERROR_NOT_FOUND << "  via=fake-alias-not-supported" << std::endl;
+				return FALSE;
+			}
+
 			FillFakeSetupDiInterfaceData(AliasDeviceInterfaceData, AliasInterfaceClassGuid);
 			SetLastError(ERROR_SUCCESS);
 			rslog::info_ts() << "  -> synthesized alias for fake interface" << std::endl;
@@ -686,7 +731,12 @@ static BOOL WINAPI Patched_SetupDiGetDeviceInterfaceDetailW(
 
 	if (kEnableSetupDiSynthesis && IsFakeSetupDiInterfaceData(DeviceInterfaceData))
 	{
-		const DWORD requiredBytes = static_cast<DWORD>(FIELD_OFFSET(SP_DEVICE_INTERFACE_DETAIL_DATA_W, DevicePath) + ((wcslen(kFakeSetupDiDevicePath) + 1) * sizeof(wchar_t)));
+		GUID detailGuid = KSCATEGORY_AUDIO;
+		if (DeviceInterfaceData)
+			detailGuid = DeviceInterfaceData->InterfaceClassGuid;
+
+		const std::wstring fakePath = BuildFakeSetupDiDevicePath(detailGuid);
+		const DWORD requiredBytes = static_cast<DWORD>(FIELD_OFFSET(SP_DEVICE_INTERFACE_DETAIL_DATA_W, DevicePath) + ((fakePath.size() + 1) * sizeof(wchar_t)));
 		if (RequiredSize)
 			*RequiredSize = requiredBytes;
 
@@ -697,17 +747,17 @@ static BOOL WINAPI Patched_SetupDiGetDeviceInterfaceDetailW(
 			return FALSE;
 		}
 
-		memcpy(DeviceInterfaceDetailData->DevicePath, kFakeSetupDiDevicePath, (wcslen(kFakeSetupDiDevicePath) + 1) * sizeof(wchar_t));
+		memcpy(DeviceInterfaceDetailData->DevicePath, fakePath.c_str(), (fakePath.size() + 1) * sizeof(wchar_t));
 		if (DeviceInfoData && DeviceInfoData->cbSize == sizeof(SP_DEVINFO_DATA))
 		{
-			DeviceInfoData->ClassGuid = KSCATEGORY_AUDIO;
+			DeviceInfoData->ClassGuid = detailGuid;
 			DeviceInfoData->DevInst = 0;
 			DeviceInfoData->Reserved = kFakeSetupDiInterfaceTag;
 		}
 
 		SetLastError(ERROR_SUCCESS);
 		rslog::info_ts() << "  -> 1  gle=0  requiredSize=" << requiredBytes << std::endl;
-		rslog::info_ts() << "  devicePath: " << kFakeSetupDiDevicePath << std::endl;
+		rslog::info_ts() << "  devicePath: " << fakePath.c_str() << std::endl;
 		return TRUE;
 	}
 
