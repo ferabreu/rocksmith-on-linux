@@ -155,6 +155,41 @@ static void EnsureRealToneCableRegistered()
 		L"{EB115FFC-10C8-4964-831D-6DCB02E6F23F}",
 	};
 
+	// Wine's SETUPDI_EnumerateMatchingInterfaces reads the DeviceInstance value from the
+	// DeviceClasses interface key and then looks up that instance in
+	// HKLM\SYSTEM\CurrentControlSet\Enum.  If the Enum entry is absent the interface is
+	// never surfaced, regardless of what exists under DeviceClasses.
+	// Create the Enum device node (USB\VID_12BA&PID_00FF\RS_ASIO) if it is missing.
+	{
+		static const wchar_t kEnumKey[] =
+			L"SYSTEM\\CurrentControlSet\\Enum\\USB\\VID_12BA&PID_00FF\\RS_ASIO";
+		// Use KSCATEGORY_AUDIO as the device class GUID (the value is arbitrary for
+		// our purposes; Wine only requires a valid GUID string to call create_device).
+		static const wchar_t kClassGuid[] = L"{6994AD04-93EF-11D0-A3CC-00A0C9223196}";
+		HKEY hKey = nullptr;
+		DWORD disp = 0;
+		LONG rc = RegCreateKeyExW(HKEY_LOCAL_MACHINE, kEnumKey, 0, nullptr,
+		                          REG_OPTION_NON_VOLATILE, KEY_WRITE, nullptr, &hKey, &disp);
+		if (rc == ERROR_SUCCESS)
+		{
+			if (disp == REG_CREATED_NEW_KEY)
+			{
+				RegSetValueExW(hKey, L"ClassGUID", 0, REG_SZ,
+				               (const BYTE*)kClassGuid,
+				               (DWORD)((wcslen(kClassGuid) + 1) * sizeof(wchar_t)));
+				RegSetValueExW(hKey, L"FriendlyName", 0, REG_SZ,
+				               (const BYTE*)kFriendlyName,
+				               (DWORD)((wcslen(kFriendlyName) + 1) * sizeof(wchar_t)));
+				rslog::info_ts() << "  created Enum device node" << std::endl;
+			}
+			RegCloseKey(hKey);
+		}
+		else
+		{
+			rslog::error_ts() << "  RegCreateKeyExW failed for Enum device node (rc=" << rc << ")" << std::endl;
+		}
+	}
+
 	int created = 0;
 	for (const auto* guid : kClassGuids)
 	{
@@ -164,26 +199,32 @@ static void EnsureRealToneCableRegistered()
 		std::wstring wGuid = guid;
 		std::wstring ifaceKey = std::wstring(L"SYSTEM\\CurrentControlSet\\Control\\DeviceClasses\\") +
 		                        wGuid + L"\\##?#USB#VID_12BA&PID_00FF#" + kInstanceSuffix + L"#" + wGuid;
-		// The \# instance subkey is what Wine checks for DIGCF_PRESENT: without it,
-		// SetupDiEnumDeviceInterfaces will not return the interface even if the parent key exists.
 		std::wstring instanceKey = ifaceKey + L"\\#";
-		std::wstring paramsKey   = ifaceKey + L"\\#\\Device Parameters";
+		std::wstring controlKey  = instanceKey + L"\\Control";
+		std::wstring paramsKey   = instanceKey + L"\\Device Parameters";
 
 		// SymbolicLink value: lowercase device path (Windows convention)
 		std::wstring symlink = std::wstring(L"\\\\?\\USB#VID_12BA&PID_00FF#") + kInstanceSuffix + L"#" + wGuid;
 		std::transform(symlink.begin(), symlink.end(), symlink.begin(),
 		               [](wchar_t c) { return (wchar_t)::towlower(c); });
 
-		// Skip only if the \# instance subkey already exists (fully registered).
-		// Previous runs may have created the parent key without \#, so we must
-		// re-check at the instance level.
+		// Skip only if the \#\Control\Linked value already exists.
+		// Wine's is_linked() checks exactly this; without it DIGCF_PRESENT will skip
+		// the interface even if the \# subkey exists.
 		{
 			HKEY hCheck = nullptr;
-			if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, instanceKey.c_str(), 0, KEY_READ, &hCheck) == ERROR_SUCCESS)
+			if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, controlKey.c_str(), 0, KEY_READ, &hCheck) == ERROR_SUCCESS)
 			{
+				DWORD linked = 0, type = 0, size = sizeof(linked);
+				bool hasLinked = (RegQueryValueExW(hCheck, L"Linked", nullptr, &type,
+				                                   (BYTE*)&linked, &size) == ERROR_SUCCESS
+				                  && type == REG_DWORD && linked != 0);
 				RegCloseKey(hCheck);
-				rslog::info_ts() << "  already registered (instance key present): " << wGuid << std::endl;
-				continue;
+				if (hasLinked)
+				{
+					rslog::info_ts() << "  already registered (Control\\Linked present): " << wGuid << std::endl;
+					continue;
+				}
 			}
 		}
 
@@ -208,9 +249,7 @@ static void EnsureRealToneCableRegistered()
 			RegCloseKey(hKey);
 		}
 
-		// Create the \# instance subkey: this marks the interface as PRESENT.
-		// Wine's SetupDiEnumDeviceInterfaces with DIGCF_PRESENT only returns
-		// interfaces that have this subkey.
+		// Create/open \# instance subkey with SymbolicLink
 		{
 			HKEY hKey = nullptr;
 			DWORD disp = 0;
@@ -226,10 +265,31 @@ static void EnsureRealToneCableRegistered()
 			               (const BYTE*)symlink.c_str(),
 			               (DWORD)((symlink.size() + 1) * sizeof(wchar_t)));
 			RegCloseKey(hKey);
+		}
+
+		// Create \#\Control with Linked=1.
+		// Wine's is_linked() reads this to decide if the interface is PRESENT
+		// (DIGCF_PRESENT / SPINT_ACTIVE).  Without it SetupDiEnumDeviceInterfaces
+		// returns ERROR_NO_MORE_ITEMS even though the \# subkey exists.
+		{
+			HKEY hKey = nullptr;
+			DWORD disp = 0;
+			LONG rc = RegCreateKeyExW(HKEY_LOCAL_MACHINE, controlKey.c_str(), 0, nullptr,
+			                          REG_OPTION_NON_VOLATILE, KEY_WRITE, nullptr, &hKey, &disp);
+			if (rc != ERROR_SUCCESS)
+			{
+				rslog::error_ts() << "  RegCreateKeyExW failed for Control key " << wGuid
+				                  << " (rc=" << rc << ")" << std::endl;
+				continue;
+			}
+			DWORD linked = 1;
+			RegSetValueExW(hKey, L"Linked", 0, REG_DWORD,
+			               (const BYTE*)&linked, sizeof(linked));
+			RegCloseKey(hKey);
 			++created;
 		}
 
-		// Create #\Device Parameters key with FriendlyName
+		// Create \#\Device Parameters with FriendlyName
 		{
 			HKEY hKey = nullptr;
 			DWORD disp = 0;
