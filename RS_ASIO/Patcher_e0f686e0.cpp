@@ -81,11 +81,16 @@ static BOOL WINAPI Diag_SetupDiGetDeviceInterfaceDetailW(HDEVINFO Set, PSP_DEVIC
 
 static BOOL WINAPI Diag_SetupDiGetDeviceInterfaceAlias(HDEVINFO Set, PSP_DEVICE_INTERFACE_DATA IfaceData, const GUID* AliasGuid, PSP_DEVICE_INTERFACE_DATA AliasIfaceData)
 {
-	BOOL ret = s_Real_SetupDiGetDeviceInterfaceAlias(Set, IfaceData, AliasGuid, AliasIfaceData);
-	DWORD gle = GetLastError();
+	// SetupDiGetDeviceInterfaceAlias is declared as "@ stub" in Wine's setupapi.spec for
+	// proton-cachyos 11.0 — calling s_Real_... would invoke Wine's __wine_spec_unimplemented_stub
+	// which prints "unimplemented function setupapi.dll.SetupDiGetDeviceInterfaceAlias, aborting"
+	// and calls ExitProcess.  We must NOT call the real function.
+	// Return FALSE / ERROR_NO_SUCH_DEVINST so the game treats this as "no alias found" and
+	// continues with the original device path from SetupDiGetDeviceInterfaceDetailW.
 	rslog::info_ts() << "Patched_SetupDiGetDeviceInterfaceAlias - aliasClassGuid=" << DiagFmtGuid(AliasGuid)
-	                 << " -> " << ret << " gle=" << gle << std::endl;
-	return ret;
+	                 << " (skipping unimplemented Wine stub -> FALSE / ERROR_NO_SUCH_DEVINST)" << std::endl;
+	SetLastError(ERROR_NO_SUCH_DEVINST);
+	return FALSE;
 }
 
 static HKEY WINAPI Diag_SetupDiOpenDeviceInterfaceRegKey(HDEVINFO Set, PSP_DEVICE_INTERFACE_DATA IfaceData, DWORD Reserved, REGSAM samDesired)
