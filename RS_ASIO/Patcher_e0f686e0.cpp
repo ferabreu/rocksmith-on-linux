@@ -81,16 +81,33 @@ static BOOL WINAPI Diag_SetupDiGetDeviceInterfaceDetailW(HDEVINFO Set, PSP_DEVIC
 
 static BOOL WINAPI Diag_SetupDiGetDeviceInterfaceAlias(HDEVINFO Set, PSP_DEVICE_INTERFACE_DATA IfaceData, const GUID* AliasGuid, PSP_DEVICE_INTERFACE_DATA AliasIfaceData)
 {
-	// SetupDiGetDeviceInterfaceAlias is declared as "@ stub" in Wine's setupapi.spec for
-	// proton-cachyos 11.0 — calling s_Real_... would invoke Wine's __wine_spec_unimplemented_stub
-	// which prints "unimplemented function setupapi.dll.SetupDiGetDeviceInterfaceAlias, aborting"
-	// and calls ExitProcess.  We must NOT call the real function.
-	// Return FALSE / ERROR_NO_SUCH_DEVINST so the game treats this as "no alias found" and
-	// continues with the original device path from SetupDiGetDeviceInterfaceDetailW.
-	rslog::info_ts() << "Patched_SetupDiGetDeviceInterfaceAlias - aliasClassGuid=" << DiagFmtGuid(AliasGuid)
-	                 << " (skipping unimplemented Wine stub -> FALSE / ERROR_NO_SUCH_DEVINST)" << std::endl;
-	SetLastError(ERROR_NO_SUCH_DEVINST);
-	return FALSE;
+	// SetupDiGetDeviceInterfaceAlias is "@ stub" (aborting) in this Wine build.
+	// The game queries aliases for KSCATEGORY_AUDIO_DEVICE and KSCATEGORY_AUDIO_CONTROL
+	// BEFORE calling SetupDiGetDeviceInterfaceDetailW.  If either alias returns FALSE,
+	// the game skips the device entirely (CreateFileW is never reached).
+	//
+	// Synthesize a successful alias by reusing the source interface's Reserved pointer.
+	// Wine's SetupDiGetDeviceInterfaceDetailW (and get_iface()) uses only Reserved to
+	// locate the internal device_iface — it does NOT validate the GUID or check set
+	// membership — so the game will receive our fake SymbolicLink path for any alias GUID.
+	rslog::info_ts() << "Patched_SetupDiGetDeviceInterfaceAlias - aliasClassGuid=" << DiagFmtGuid(AliasGuid);
+
+	if (!IfaceData || !IfaceData->Reserved)
+	{
+		rslog::info_ts() << " -> FALSE (invalid source IfaceData)" << std::endl;
+		SetLastError(ERROR_INVALID_PARAMETER);
+		return FALSE;
+	}
+
+	if (AliasIfaceData)
+	{
+		// cbSize is set by the caller per API convention; fill in the remaining fields.
+		AliasIfaceData->InterfaceClassGuid = *AliasGuid;
+		AliasIfaceData->Flags  = SPINT_ACTIVE;           // interface is present / active
+		AliasIfaceData->Reserved = IfaceData->Reserved;  // same Wine-internal device_iface ptr
+	}
+	rslog::info_ts() << " -> TRUE (alias synthesized from source Reserved)" << std::endl;
+	return TRUE;
 }
 
 static HKEY WINAPI Diag_SetupDiOpenDeviceInterfaceRegKey(HDEVINFO Set, PSP_DEVICE_INTERFACE_DATA IfaceData, DWORD Reserved, REGSAM samDesired)
@@ -110,15 +127,22 @@ static BOOL WINAPI Diag_SetupDiDestroyDeviceInfoList(HDEVINFO Set)
 
 static HANDLE WINAPI Diag_CreateFileW(LPCWSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShareMode, LPSECURITY_ATTRIBUTES lpSA, DWORD dwCD, DWORD dwFlags, HANDLE hTemplate)
 {
-	HANDLE ret = s_Real_CreateFileW(lpFileName, dwDesiredAccess, dwShareMode, lpSA, dwCD, dwFlags, hTemplate);
-	// Only log paths that could relate to KS/USB audio device access
-	if (lpFileName && (wcsstr(lpFileName, L"VID_12BA") || wcsstr(lpFileName, L"RS_ASIO") || wcsstr(lpFileName, L"KSCATEGORY")))
+	// Intercept opens on our fake KS cable device path.  Wine has no KS USB audio
+	// driver, so the real CreateFileW on a \\?\USB#VID_12BA... path would return
+	// INVALID_HANDLE_VALUE, causing the game to treat the cable as absent.
+	// Return a handle to the Windows null device so the game gets a valid, closeable handle.
+	if (lpFileName && (wcsstr(lpFileName, L"VID_12BA") || wcsstr(lpFileName, L"RS_ASIO")))
 	{
-		rslog::info_ts() << "Patched_CreateFileW: " << std::wstring(lpFileName)
+		HANDLE hDummy = s_Real_CreateFileW(L"\\\\.\\NUL", 0,
+		                                    FILE_SHARE_READ | FILE_SHARE_WRITE,
+		                                    nullptr, OPEN_EXISTING, 0, nullptr);
+		rslog::info_ts() << "Patched_CreateFileW (cable path intercepted -> NUL handle): "
+		                 << std::wstring(lpFileName)
 		                 << " access=0x" << std::hex << dwDesiredAccess
-		                 << " -> " << ret << " gle=" << GetLastError() << std::endl;
+		                 << " -> " << hDummy << " gle=" << std::dec << GetLastError() << std::endl;
+		return hDummy;
 	}
-	return ret;
+	return s_Real_CreateFileW(lpFileName, dwDesiredAccess, dwShareMode, lpSA, dwCD, dwFlags, hTemplate);
 }
 
 // ---------------------------------------------------------------------------
