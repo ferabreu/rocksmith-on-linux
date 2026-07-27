@@ -1,6 +1,120 @@
 #include "stdafx.h"
 #include "dllmain.h"
 #include "Patcher.h"
+#include <setupapi.h>
+
+// ---------------------------------------------------------------------------
+// SetupAPI and CreateFile diagnostic hooks (pass-through, logging only).
+// These let us see exactly what the game does after our registry entries are
+// created: whether SetupAPI finds them, what device path it gets, and whether
+// the game then tries CreateFile on that path.
+// ---------------------------------------------------------------------------
+
+// IAT RVAs for the diagnostic functions (objdump format; actual address = ImageBase + RVA)
+static const DWORD IAT_RVA_SetupDiGetClassDevsA          = 0x0088d2d4;
+static const DWORD IAT_RVA_SetupDiEnumDeviceInterfaces   = 0x0088d2d8;
+static const DWORD IAT_RVA_SetupDiGetDeviceInterfaceDetailW = 0x0088d2c8;
+static const DWORD IAT_RVA_SetupDiGetDeviceInterfaceAlias  = 0x0088d2d0;
+static const DWORD IAT_RVA_SetupDiOpenDeviceInterfaceRegKey = 0x0088d2c0;
+static const DWORD IAT_RVA_SetupDiDestroyDeviceInfoList    = 0x0088d2cc;
+static const DWORD IAT_RVA_CreateFileW                     = 0x0088d128;
+
+typedef HDEVINFO (WINAPI* PFN_SetupDiGetClassDevsA)(const GUID*, PCSTR, HWND, DWORD);
+typedef BOOL (WINAPI* PFN_SetupDiEnumDeviceInterfaces)(HDEVINFO, PSP_DEVINFO_DATA, const GUID*, DWORD, PSP_DEVICE_INTERFACE_DATA);
+typedef BOOL (WINAPI* PFN_SetupDiGetDeviceInterfaceDetailW)(HDEVINFO, PSP_DEVICE_INTERFACE_DATA, PSP_DEVICE_INTERFACE_DETAIL_DATA_W, DWORD, PDWORD, PSP_DEVINFO_DATA);
+typedef BOOL (WINAPI* PFN_SetupDiGetDeviceInterfaceAlias)(HDEVINFO, PSP_DEVICE_INTERFACE_DATA, const GUID*, PSP_DEVICE_INTERFACE_DATA);
+typedef HKEY (WINAPI* PFN_SetupDiOpenDeviceInterfaceRegKey)(HDEVINFO, PSP_DEVICE_INTERFACE_DATA, DWORD, REGSAM);
+typedef BOOL (WINAPI* PFN_SetupDiDestroyDeviceInfoList)(HDEVINFO);
+typedef HANDLE (WINAPI* PFN_CreateFileW)(LPCWSTR, DWORD, DWORD, LPSECURITY_ATTRIBUTES, DWORD, DWORD, HANDLE);
+
+static PFN_SetupDiGetClassDevsA           s_Real_SetupDiGetClassDevsA          = nullptr;
+static PFN_SetupDiEnumDeviceInterfaces    s_Real_SetupDiEnumDeviceInterfaces   = nullptr;
+static PFN_SetupDiGetDeviceInterfaceDetailW s_Real_SetupDiGetDeviceInterfaceDetailW = nullptr;
+static PFN_SetupDiGetDeviceInterfaceAlias  s_Real_SetupDiGetDeviceInterfaceAlias = nullptr;
+static PFN_SetupDiOpenDeviceInterfaceRegKey s_Real_SetupDiOpenDeviceInterfaceRegKey = nullptr;
+static PFN_SetupDiDestroyDeviceInfoList    s_Real_SetupDiDestroyDeviceInfoList  = nullptr;
+static PFN_CreateFileW                     s_Real_CreateFileW                   = nullptr;
+
+static std::string DiagFmtGuid(const GUID* g)
+{
+	if (!g) return "(null)";
+	char buf[40];
+	sprintf_s(buf, sizeof(buf),
+	          "{%08X-%04X-%04X-%02X%02X-%02X%02X%02X%02X%02X%02X}",
+	          g->Data1, g->Data2, g->Data3,
+	          g->Data4[0], g->Data4[1], g->Data4[2], g->Data4[3],
+	          g->Data4[4], g->Data4[5], g->Data4[6], g->Data4[7]);
+	return std::string(buf);
+}
+
+static HDEVINFO WINAPI Diag_SetupDiGetClassDevsA(const GUID* ClassGuid, PCSTR Enumerator, HWND hwndParent, DWORD Flags)
+{
+	HDEVINFO ret = s_Real_SetupDiGetClassDevsA(ClassGuid, Enumerator, hwndParent, Flags);
+	DWORD gle = GetLastError();
+	rslog::info_ts() << "Patched_SetupDiGetClassDevsA - flags=0x" << std::hex << Flags
+	                 << " classGuid=" << DiagFmtGuid(ClassGuid)
+	                 << " -> " << ret << " gle=" << std::dec << gle << std::endl;
+	return ret;
+}
+
+static BOOL WINAPI Diag_SetupDiEnumDeviceInterfaces(HDEVINFO Set, PSP_DEVINFO_DATA DevData, const GUID* IfaceGuid, DWORD MemberIdx, PSP_DEVICE_INTERFACE_DATA IfaceData)
+{
+	BOOL ret = s_Real_SetupDiEnumDeviceInterfaces(Set, DevData, IfaceGuid, MemberIdx, IfaceData);
+	DWORD gle = GetLastError();
+	rslog::info_ts() << "Patched_SetupDiEnumDeviceInterfaces - MemberIndex=" << MemberIdx
+	                 << " ifaceClassGuid=" << DiagFmtGuid(IfaceGuid)
+	                 << " -> " << ret << " gle=" << gle << std::endl;
+	return ret;
+}
+
+static BOOL WINAPI Diag_SetupDiGetDeviceInterfaceDetailW(HDEVINFO Set, PSP_DEVICE_INTERFACE_DATA IfaceData, PSP_DEVICE_INTERFACE_DETAIL_DATA_W Detail, DWORD DetailSize, PDWORD RequiredSize, PSP_DEVINFO_DATA DevData)
+{
+	BOOL ret = s_Real_SetupDiGetDeviceInterfaceDetailW(Set, IfaceData, Detail, DetailSize, RequiredSize, DevData);
+	DWORD gle = GetLastError();
+	rslog::info_ts() << "Patched_SetupDiGetDeviceInterfaceDetailW - detailSize=" << DetailSize
+	                 << " -> " << ret << " gle=" << gle;
+	if (ret && Detail && Detail->DevicePath[0])
+		rslog::info_ts() << " path: " << std::wstring(Detail->DevicePath);
+	rslog::info_ts() << std::endl;
+	return ret;
+}
+
+static BOOL WINAPI Diag_SetupDiGetDeviceInterfaceAlias(HDEVINFO Set, PSP_DEVICE_INTERFACE_DATA IfaceData, const GUID* AliasGuid, PSP_DEVICE_INTERFACE_DATA AliasIfaceData)
+{
+	BOOL ret = s_Real_SetupDiGetDeviceInterfaceAlias(Set, IfaceData, AliasGuid, AliasIfaceData);
+	DWORD gle = GetLastError();
+	rslog::info_ts() << "Patched_SetupDiGetDeviceInterfaceAlias - aliasClassGuid=" << DiagFmtGuid(AliasGuid)
+	                 << " -> " << ret << " gle=" << gle << std::endl;
+	return ret;
+}
+
+static HKEY WINAPI Diag_SetupDiOpenDeviceInterfaceRegKey(HDEVINFO Set, PSP_DEVICE_INTERFACE_DATA IfaceData, DWORD Reserved, REGSAM samDesired)
+{
+	HKEY ret = s_Real_SetupDiOpenDeviceInterfaceRegKey(Set, IfaceData, Reserved, samDesired);
+	rslog::info_ts() << "Patched_SetupDiOpenDeviceInterfaceRegKey - samDesired=0x" << std::hex << samDesired
+	                 << " -> " << ret << " gle=" << GetLastError() << std::endl;
+	return ret;
+}
+
+static BOOL WINAPI Diag_SetupDiDestroyDeviceInfoList(HDEVINFO Set)
+{
+	BOOL ret = s_Real_SetupDiDestroyDeviceInfoList(Set);
+	rslog::info_ts() << "Patched_SetupDiDestroyDeviceInfoList -> " << ret << " gle=" << GetLastError() << std::endl;
+	return ret;
+}
+
+static HANDLE WINAPI Diag_CreateFileW(LPCWSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShareMode, LPSECURITY_ATTRIBUTES lpSA, DWORD dwCD, DWORD dwFlags, HANDLE hTemplate)
+{
+	HANDLE ret = s_Real_CreateFileW(lpFileName, dwDesiredAccess, dwShareMode, lpSA, dwCD, dwFlags, hTemplate);
+	// Only log paths that could relate to KS/USB audio device access
+	if (lpFileName && (wcsstr(lpFileName, L"VID_12BA") || wcsstr(lpFileName, L"RS_ASIO") || wcsstr(lpFileName, L"KSCATEGORY")))
+	{
+		rslog::info_ts() << "Patched_CreateFileW: " << std::wstring(lpFileName)
+		                 << " access=0x" << std::hex << dwDesiredAccess
+		                 << " -> " << ret << " gle=" << GetLastError() << std::endl;
+	}
+	return ret;
+}
 
 // ---------------------------------------------------------------------------
 // Ensure the Real Tone Cable (USB VID_12BA:PID_00FF) is registered in Wine's
@@ -213,6 +327,22 @@ void PatchOriginalCode_e0f686e0()
 	// SetupAPI cable-presence check finds the Real Tone Cable.
 	EnsureRealToneCableRegistered();
 
+	// Capture original function pointers from the IAT before we overwrite the slots.
+	// The diagnostic wrappers call through these to preserve real behaviour.
+	{
+		const HMODULE hMod = GetModuleHandle(NULL);
+		auto ReadSlot = [hMod](DWORD rva) -> void* {
+			return *reinterpret_cast<void**>(reinterpret_cast<BYTE*>(hMod) + rva);
+		};
+		s_Real_SetupDiGetClassDevsA          = (PFN_SetupDiGetClassDevsA)         ReadSlot(IAT_RVA_SetupDiGetClassDevsA);
+		s_Real_SetupDiEnumDeviceInterfaces   = (PFN_SetupDiEnumDeviceInterfaces)  ReadSlot(IAT_RVA_SetupDiEnumDeviceInterfaces);
+		s_Real_SetupDiGetDeviceInterfaceDetailW = (PFN_SetupDiGetDeviceInterfaceDetailW)ReadSlot(IAT_RVA_SetupDiGetDeviceInterfaceDetailW);
+		s_Real_SetupDiGetDeviceInterfaceAlias   = (PFN_SetupDiGetDeviceInterfaceAlias)  ReadSlot(IAT_RVA_SetupDiGetDeviceInterfaceAlias);
+		s_Real_SetupDiOpenDeviceInterfaceRegKey = (PFN_SetupDiOpenDeviceInterfaceRegKey)ReadSlot(IAT_RVA_SetupDiOpenDeviceInterfaceRegKey);
+		s_Real_SetupDiDestroyDeviceInfoList  = (PFN_SetupDiDestroyDeviceInfoList) ReadSlot(IAT_RVA_SetupDiDestroyDeviceInfoList);
+		s_Real_CreateFileW                   = (PFN_CreateFileW)                  ReadSlot(IAT_RVA_CreateFileW);
+	}
+
 	bool ok = true;
 
 	ok &= PatchIATEntry(IAT_RVA_CoCreateInstance,
@@ -227,6 +357,15 @@ void PatchOriginalCode_e0f686e0()
 	                    reinterpret_cast<void*>(&Patched_CoGetInterfaceAndReleaseStream),
 	                    "CoGetInterfaceAndReleaseStream");
 
+	// Diagnostic-only hooks: pass through to real functions, log inputs/results.
+	PatchIATEntry(IAT_RVA_SetupDiGetClassDevsA,           reinterpret_cast<void*>(&Diag_SetupDiGetClassDevsA),           "SetupDiGetClassDevsA");
+	PatchIATEntry(IAT_RVA_SetupDiEnumDeviceInterfaces,    reinterpret_cast<void*>(&Diag_SetupDiEnumDeviceInterfaces),    "SetupDiEnumDeviceInterfaces");
+	PatchIATEntry(IAT_RVA_SetupDiGetDeviceInterfaceDetailW,reinterpret_cast<void*>(&Diag_SetupDiGetDeviceInterfaceDetailW),"SetupDiGetDeviceInterfaceDetailW");
+	PatchIATEntry(IAT_RVA_SetupDiGetDeviceInterfaceAlias, reinterpret_cast<void*>(&Diag_SetupDiGetDeviceInterfaceAlias), "SetupDiGetDeviceInterfaceAlias");
+	PatchIATEntry(IAT_RVA_SetupDiOpenDeviceInterfaceRegKey,reinterpret_cast<void*>(&Diag_SetupDiOpenDeviceInterfaceRegKey),"SetupDiOpenDeviceInterfaceRegKey");
+	PatchIATEntry(IAT_RVA_SetupDiDestroyDeviceInfoList,   reinterpret_cast<void*>(&Diag_SetupDiDestroyDeviceInfoList),   "SetupDiDestroyDeviceInfoList");
+	PatchIATEntry(IAT_RVA_CreateFileW,                    reinterpret_cast<void*>(&Diag_CreateFileW),                    "CreateFileW");
+
 	if (!ok)
 	{
 		rslog::error_ts() << __FUNCTION__ << " - one or more IAT patches failed" << std::endl;
@@ -236,3 +375,4 @@ void PatchOriginalCode_e0f686e0()
 		rslog::info_ts() << __FUNCTION__ << " - all IAT patches applied successfully" << std::endl;
 	}
 }
+
