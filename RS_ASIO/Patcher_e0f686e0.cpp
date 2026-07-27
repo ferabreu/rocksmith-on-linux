@@ -128,8 +128,7 @@ static BOOL WINAPI Diag_SetupDiDestroyDeviceInfoList(HDEVINFO Set)
 static bool IsCableDevicePath(LPCWSTR path)
 {
 	if (!path) return false;
-	// Case-insensitive search: our SymbolicLink is stored lowercase, but we must
-	// also handle mixed-case paths from other callers.
+	// Case-insensitive search: our SymbolicLink is stored lowercase.
 	wchar_t lower[512];
 	DWORD len = 0;
 	while (path[len] && len < (ARRAYSIZE(lower) - 1)) { lower[len] = (wchar_t)towlower(path[len]); ++len; }
@@ -137,22 +136,32 @@ static bool IsCableDevicePath(LPCWSTR path)
 	return wcsstr(lower, L"vid_12ba") != nullptr || wcsstr(lower, L"rs_asio") != nullptr;
 }
 
+static bool IsFakeRsAsioCablePath(LPCWSTR path)
+{
+	// Returns true ONLY for our synthetic RS_ASIO entry.
+	// Real cable paths registered by winepipewire (e.g. vid_12ba...7182&2ad191bf) must NOT
+	// be intercepted — Wine's KS subsystem can open them directly, the same way it handles
+	// the winepulse-registered path when PROTON_USE_PIPEWIRE=0.
+	if (!path) return false;
+	wchar_t lower[512];
+	DWORD len = 0;
+	while (path[len] && len < (ARRAYSIZE(lower) - 1)) { lower[len] = (wchar_t)towlower(path[len]); ++len; }
+	lower[len] = L'\0';
+	return wcsstr(lower, L"rs_asio") != nullptr;
+}
+
 static HANDLE WINAPI Diag_CreateFileW(LPCWSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShareMode, LPSECURITY_ATTRIBUTES lpSA, DWORD dwCD, DWORD dwFlags, HANDLE hTemplate)
 {
-	// Log ALL CreateFileW calls so we can see if the game opens our cable path.
-	// (Previous hook filtered first and was silent on non-matching paths; that meant
-	// a lowercase path like \\?\usb#vid_12ba... would silently fall through unlogged.)
-	bool isCable = IsCableDevicePath(lpFileName);
-
-	if (isCable)
+	if (IsFakeRsAsioCablePath(lpFileName))
 	{
-		// Wine has no KS USB audio driver; the real CreateFileW on our SymbolicLink path
-		// returns INVALID_HANDLE_VALUE.  Return a handle to the Windows null device so
-		// the game receives a valid, closeable handle and treats the cable as present.
+		// Our synthetic RS_ASIO entry has no real KS device behind it.
+		// Return a null-device handle so the game gets a valid, closeable handle.
+		// The game will likely fail its IOCTL check on this handle and move on to
+		// the real winepipewire-registered cable path (vid_12ba...REAL_INSTANCE).
 		HANDLE hDummy = s_Real_CreateFileW(L"\\\\.\\NUL", 0,
 		                                    FILE_SHARE_READ | FILE_SHARE_WRITE,
 		                                    nullptr, OPEN_EXISTING, 0, nullptr);
-		rslog::info_ts() << "Patched_CreateFileW (cable path -> NUL handle): "
+		rslog::info_ts() << "Patched_CreateFileW (fake RS_ASIO path -> NUL): "
 		                 << std::wstring(lpFileName)
 		                 << " access=0x" << std::hex << dwDesiredAccess
 		                 << " -> " << hDummy << " gle=" << std::dec << GetLastError() << std::endl;
@@ -161,10 +170,10 @@ static HANDLE WINAPI Diag_CreateFileW(LPCWSTR lpFileName, DWORD dwDesiredAccess,
 
 	HANDLE ret = s_Real_CreateFileW(lpFileName, dwDesiredAccess, dwShareMode, lpSA, dwCD, dwFlags, hTemplate);
 
-	// Log any path that looks remotely device-like (starts with \\.\) for diagnostics.
-	if (lpFileName && lpFileName[0] == L'\\' && lpFileName[1] == L'\\')
+	// Log all device-like paths (\\?\ or \\.\) including the real cable path from winepipewire.
+	if (IsCableDevicePath(lpFileName) || (lpFileName && lpFileName[0] == L'\\' && lpFileName[1] == L'\\'))
 	{
-		rslog::info_ts() << "Patched_CreateFileW (device path passthrough): "
+		rslog::info_ts() << "Patched_CreateFileW: "
 		                 << std::wstring(lpFileName)
 		                 << " access=0x" << std::hex << dwDesiredAccess
 		                 << " -> " << ret << " gle=" << std::dec << GetLastError() << std::endl;
