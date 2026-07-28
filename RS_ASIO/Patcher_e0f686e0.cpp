@@ -47,13 +47,37 @@ static std::string DiagFmtGuid(const GUID* g)
 	return std::string(buf);
 }
 
+// Returns a human-readable string for common Windows error codes so log readers
+// do not need to look up numeric codes manually.
+static std::string WinErrStr(DWORD gle)
+{
+	switch (gle)
+	{
+	case ERROR_SUCCESS:             return "0 (ERROR_SUCCESS)";
+	case ERROR_FILE_NOT_FOUND:      return "2 (ERROR_FILE_NOT_FOUND - no matching registry/device entries)";
+	case ERROR_ACCESS_DENIED:       return "5 (ERROR_ACCESS_DENIED)";
+	case ERROR_INVALID_HANDLE:      return "6 (ERROR_INVALID_HANDLE)";
+	case ERROR_INVALID_PARAMETER:   return "87 (ERROR_INVALID_PARAMETER)";
+	case ERROR_INSUFFICIENT_BUFFER: return "122 (ERROR_INSUFFICIENT_BUFFER)";
+	case ERROR_NO_MORE_ITEMS:       return "259 (ERROR_NO_MORE_ITEMS - end of enumeration, normal)";
+	default:
+		return std::to_string(gle);
+	}
+}
+
 static HDEVINFO WINAPI Diag_SetupDiGetClassDevsA(const GUID* ClassGuid, PCSTR Enumerator, HWND hwndParent, DWORD Flags)
 {
 	HDEVINFO ret = s_Real_SetupDiGetClassDevsA(ClassGuid, Enumerator, hwndParent, Flags);
 	DWORD gle = GetLastError();
 	rslog::info_ts() << "Patched_SetupDiGetClassDevsA - flags=0x" << std::hex << Flags
 	                 << " classGuid=" << DiagFmtGuid(ClassGuid)
-	                 << " -> " << ret << " gle=" << std::dec << gle << std::endl;
+	                 << " -> " << ret << " gle=" << WinErrStr(gle);
+	if (ret == INVALID_HANDLE_VALUE)
+		rslog::info_ts() << " [WARN: no device info set returned - KS registry entries for the cable may be"
+		                    " missing, malformed, or Control\\Linked is not set; cable scan cannot proceed]";
+	else
+		rslog::info_ts() << " [OK: device info set created - will enumerate interfaces below]";
+	rslog::info_ts() << std::endl;
 	return ret;
 }
 
@@ -63,7 +87,17 @@ static BOOL WINAPI Diag_SetupDiEnumDeviceInterfaces(HDEVINFO Set, PSP_DEVINFO_DA
 	DWORD gle = GetLastError();
 	rslog::info_ts() << "Patched_SetupDiEnumDeviceInterfaces - MemberIndex=" << MemberIdx
 	                 << " ifaceClassGuid=" << DiagFmtGuid(IfaceGuid)
-	                 << " -> " << ret << " gle=" << gle << std::endl;
+	                 << " -> " << ret << " gle=" << WinErrStr(gle);
+	if (ret)
+		rslog::info_ts() << " [interface found - alias queries and detail fetch will follow]";
+	else if (gle == ERROR_NO_MORE_ITEMS)
+		rslog::info_ts() << " [end of interface list - normal termination of scan]";
+	else if (MemberIdx == 0)
+		rslog::info_ts() << " [WARN: first interface (index 0) not found - no cable KS interfaces are"
+		                    " registered; check EnsureRealToneCableRegistered output above]";
+	else
+		rslog::info_ts() << " [no interface at this index]";
+	rslog::info_ts() << std::endl;
 	return ret;
 }
 
@@ -72,9 +106,20 @@ static BOOL WINAPI Diag_SetupDiGetDeviceInterfaceDetailW(HDEVINFO Set, PSP_DEVIC
 	BOOL ret = s_Real_SetupDiGetDeviceInterfaceDetailW(Set, IfaceData, Detail, DetailSize, RequiredSize, DevData);
 	DWORD gle = GetLastError();
 	rslog::info_ts() << "Patched_SetupDiGetDeviceInterfaceDetailW - detailSize=" << DetailSize
-	                 << " -> " << ret << " gle=" << gle;
+	                 << " -> " << ret << " gle=" << WinErrStr(gle);
 	if (ret && Detail && Detail->DevicePath[0])
+	{
 		rslog::info_ts() << " path: " << std::wstring(Detail->DevicePath);
+		// Annotate the path type so it's easy to tell which entry the game is processing
+		std::wstring lpath(Detail->DevicePath);
+		std::transform(lpath.begin(), lpath.end(), lpath.begin(), [](wchar_t c){ return towlower(c); });
+		if (lpath.find(L"rs_asio") != std::wstring::npos)
+			rslog::info_ts() << " [synthetic RS_ASIO entry - no real KS device; CreateFileW will be redirected to NUL]";
+		else if (lpath.find(L"vid_12ba") != std::wstring::npos)
+			rslog::info_ts() << " [real cable hardware path - Wine KS open will likely fail under winepipewire]";
+	}
+	else if (!ret)
+		rslog::info_ts() << " [WARN: could not retrieve device path]";
 	rslog::info_ts() << std::endl;
 	return ret;
 }
@@ -113,15 +158,23 @@ static BOOL WINAPI Diag_SetupDiGetDeviceInterfaceAlias(HDEVINFO Set, PSP_DEVICE_
 static HKEY WINAPI Diag_SetupDiOpenDeviceInterfaceRegKey(HDEVINFO Set, PSP_DEVICE_INTERFACE_DATA IfaceData, DWORD Reserved, REGSAM samDesired)
 {
 	HKEY ret = s_Real_SetupDiOpenDeviceInterfaceRegKey(Set, IfaceData, Reserved, samDesired);
+	DWORD gle = GetLastError();
 	rslog::info_ts() << "Patched_SetupDiOpenDeviceInterfaceRegKey - samDesired=0x" << std::hex << samDesired
-	                 << " -> " << ret << " gle=" << GetLastError() << std::endl;
+	                 << " -> " << ret << " gle=" << WinErrStr(gle);
+	if (ret == INVALID_HANDLE_VALUE)
+		rslog::info_ts() << " [WARN: registry key open failed - the interface's DeviceClasses key may be"
+		                    " incomplete; the game may skip this interface]";
+	else
+		rslog::info_ts() << " [OK: registry key opened]";
+	rslog::info_ts() << std::endl;
 	return ret;
 }
 
 static BOOL WINAPI Diag_SetupDiDestroyDeviceInfoList(HDEVINFO Set)
 {
 	BOOL ret = s_Real_SetupDiDestroyDeviceInfoList(Set);
-	rslog::info_ts() << "Patched_SetupDiDestroyDeviceInfoList -> " << ret << " gle=" << GetLastError() << std::endl;
+	rslog::info_ts() << "Patched_SetupDiDestroyDeviceInfoList -> " << ret << " gle=" << WinErrStr(GetLastError())
+	                 << " [KS cable scan complete - see CreateFileW results above for outcome]" << std::endl;
 	return ret;
 }
 
@@ -164,7 +217,9 @@ static HANDLE WINAPI Diag_CreateFileW(LPCWSTR lpFileName, DWORD dwDesiredAccess,
 		rslog::info_ts() << "Patched_CreateFileW (fake RS_ASIO path -> NUL): "
 		                 << std::wstring(lpFileName)
 		                 << " access=0x" << std::hex << dwDesiredAccess
-		                 << " -> " << hDummy << " gle=" << std::dec << GetLastError() << std::endl;
+		                 << " -> " << hDummy << " gle=" << WinErrStr(GetLastError())
+		                 << " [synthetic entry redirected to NUL; game will issue an IOCTL that fails"
+		                    " gracefully, then move to the next cable interface]" << std::endl;
 		return hDummy;
 	}
 
@@ -176,7 +231,11 @@ static HANDLE WINAPI Diag_CreateFileW(LPCWSTR lpFileName, DWORD dwDesiredAccess,
 		rslog::info_ts() << "Patched_CreateFileW: "
 		                 << std::wstring(lpFileName)
 		                 << " access=0x" << std::hex << dwDesiredAccess
-		                 << " -> " << ret << " gle=" << std::dec << GetLastError() << std::endl;
+		                 << " -> " << ret << " gle=" << WinErrStr(GetLastError());
+		if (ret == INVALID_HANDLE_VALUE && IsCableDevicePath(lpFileName))
+			rslog::info_ts() << " [WARN: KS device open FAILED - Wine has no KS driver for this path;"
+		                    " expected under winepipewire - cable detection depends on WASAPI properties instead]";
+		rslog::info_ts() << std::endl;
 	}
 	return ret;
 }
@@ -375,8 +434,13 @@ static void EnsureRealToneCableRegistered()
 		}
 	}
 
-	rslog::info_ts() << "EnsureRealToneCableRegistered: created " << created
-	                 << " missing interface registration(s)" << std::endl;
+	rslog::info_ts() << "EnsureRealToneCableRegistered: " << created << " KS interface(s) created";
+	if (created == 0)
+		rslog::info_ts() << " [all 4 registrations already present in registry]"
+		                    " [if cable is still not detected, the issue is in WASAPI properties, not KS registry]";
+	else
+		rslog::info_ts() << " [new entries written to registry - SetupDiGetClassDevsA should return them now]";
+	rslog::info_ts() << std::endl;
 }
 
 // Patch code for Rocksmith (2011), CRC32 0xe0f686e0
