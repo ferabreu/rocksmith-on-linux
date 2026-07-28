@@ -101,13 +101,24 @@ HRESULT STDMETHODCALLTYPE DebugWrapperDevicePropertyStore::GetCount(DWORD *cProp
 
 	if (SUCCEEDED(hr) && cProps)
 	{
+		m_RealPropertyCount = *cProps;
 		rslog::info_ts() << "  *cProps: " << std::dec << *cProps;
-		if (*cProps >= 10)
-			rslog::info_ts() << " [winepulse-like count — cable detection should work if this is the cable device]";
+
+		if (m_IsCableDevice && *cProps < 10)
+		{
+			// The cable device is missing the 2 USB ID properties under winepipewire.
+			// The game loops GetAt(0..count-1) + GetValue, so it only reads those
+			// properties if count is 10.  Return 10 so GetAt(8/9) are reached.
+			// GetAt will inject PKEY_USB_DeviceId1/2; GetValue will inject VID_12BA strings.
+			*cProps = 10;
+			rslog::info_ts() << " -> overriding to 10 [injecting 2 USB ID properties for cable detection]";
+		}
+		else if (*cProps >= 10)
+			rslog::info_ts() << " [winepulse-like count - cable detection should work if this is the cable device]";
 		else if (*cProps == 8)
-			rslog::info_ts() << " [winepipewire-like count — cable detection may fail; see GetValue output below for missing properties]";
+			rslog::info_ts() << " [winepipewire-like count - cable detection may fail; see GetValue output below for missing properties]";
 		else if (*cProps == 0)
-			rslog::info_ts() << " [WARN: empty property store — device may be misconfigured]";
+			rslog::info_ts() << " [WARN: empty property store - device may be misconfigured]";
 		rslog::info_ts() << std::endl;
 	}
 
@@ -116,12 +127,48 @@ HRESULT STDMETHODCALLTYPE DebugWrapperDevicePropertyStore::GetCount(DWORD *cProp
 
 HRESULT STDMETHODCALLTYPE DebugWrapperDevicePropertyStore::GetAt(DWORD iProp, PROPERTYKEY *pkey)
 {
-	// NOTE: this log entry gets too noisy on WASAPI devices...
-	//rslog::info_ts() << m_DeviceId << " " __FUNCTION__ " - iProp: " << std::dec << iProp << std::endl;
+	// For the cable device, inject the 2 missing USB ID property keys at indices
+	// m_RealPropertyCount (8) and m_RealPropertyCount+1 (9).  The game loops
+	// GetAt(0..count-1) and calls GetValue for each returned key.  These two
+	// injected keys are present in winepulse cable endpoints (count=10) but absent
+	// under winepipewire (count=8).  GetValue will supply their VID_12BA values.
+	if (m_IsCableDevice && m_RealPropertyCount > 0 && iProp >= m_RealPropertyCount)
+	{
+		if (!pkey) return E_POINTER;
+		if (iProp == m_RealPropertyCount)
+		{
+			*pkey = PKEY_Device_DeviceIdHiddenKey1;
+			rslog::info_ts() << m_DeviceId << " PropertyStore::GetAt iProp=" << std::dec << iProp
+			                 << " [INJECTED PKEY_USB_DeviceId1 - cable detection key 1]" << std::endl;
+			return S_OK;
+		}
+		if (iProp == m_RealPropertyCount + 1)
+		{
+			*pkey = PKEY_Device_DeviceIdHiddenKey2;
+			rslog::info_ts() << m_DeviceId << " PropertyStore::GetAt iProp=" << std::dec << iProp
+			                 << " [INJECTED PKEY_USB_DeviceId2 - cable detection key 2]" << std::endl;
+			return S_OK;
+		}
+		return HRESULT_FROM_WIN32(ERROR_NO_MORE_ITEMS);
+	}
 
 	HRESULT hr = m_RealPropertyStore.GetAt(iProp, pkey);
+	rslog::info_ts() << m_DeviceId << " PropertyStore::GetAt iProp=" << std::dec << iProp;
+	if (SUCCEEDED(hr) && pkey)
+	{
+		char guidStr[40];
+		const auto& g = pkey->fmtid;
+		sprintf_s(guidStr, sizeof(guidStr),
+		          "{%08X-%04X-%04X-%02X%02X-%02X%02X%02X%02X%02X%02X}",
+		          g.Data1, g.Data2, g.Data3,
+		          g.Data4[0], g.Data4[1], g.Data4[2], g.Data4[3],
+		          g.Data4[4], g.Data4[5], g.Data4[6], g.Data4[7]);
+		const char* keyName = PropKeyName(*pkey);
+		rslog::info_ts() << " key=" << guidStr << " pid=" << pkey->pid;
+		if (keyName) rslog::info_ts() << " (" << keyName << ")";
+	}
+	rslog::info_ts() << std::endl;
 	DEBUG_PRINT_HR(hr);
-
 	return hr;
 }
 
@@ -131,6 +178,47 @@ HRESULT STDMETHODCALLTYPE DebugWrapperDevicePropertyStore::GetValue(REFPROPERTYK
 
 	if (pv)
 	{
+		// Identify the cable device from its FriendlyName so we know when to inject.
+		if (!m_IsCableDevice && pv->vt == VT_LPWSTR && pv->pwszVal)
+		{
+			// {A45C254E-DF1C-4EFD-8020-67D146A850E0} pid=14 = PKEY_Device_FriendlyName
+			static const GUID kFriendlyNameGuid = {0xa45c254e, 0xdf1c, 0x4efd, {0x80, 0x20, 0x67, 0xd1, 0x46, 0xa8, 0x50, 0xe0}};
+			if (IsEqualGUID(key.fmtid, kFriendlyNameGuid) && key.pid == 14
+			    && wcsstr(pv->pwszVal, L"Guitar Adapter"))
+			{
+				m_IsCableDevice = true;
+				rslog::info_ts() << m_DeviceId << " [cable device identified from FriendlyName"
+				                    " - will inject 2 USB ID properties to enable cable detection]" << std::endl;
+			}
+		}
+
+		// Inject the 2 USB ID properties that are absent under winepipewire.
+		// The game's property enumeration loop will reach these via the injected GetAt
+		// keys, call GetValue, and find VID_12BA&PID_00FF to confirm it's the cable.
+		if (m_IsCableDevice && pv->vt == VT_EMPTY)
+		{
+			if (IsEqualPropertyKey(key, PKEY_Device_DeviceIdHiddenKey1))
+			{
+				static const wchar_t kVal[] = L"{1}.USB\\VID_12BA&PID_00FF\\7182&2AD191BF";
+				pv->vt = VT_LPWSTR;
+				pv->pwszVal = (LPWSTR)CoTaskMemAlloc(sizeof(kVal));
+				if (pv->pwszVal) memcpy(pv->pwszVal, kVal, sizeof(kVal));
+				rslog::info_ts() << m_DeviceId << " PropertyStore::GetValue"
+				                    " [INJECTED PKEY_USB_DeviceId1] val=" << kVal << std::endl;
+				return pv->pwszVal ? S_OK : E_OUTOFMEMORY;
+			}
+			if (IsEqualPropertyKey(key, PKEY_Device_DeviceIdHiddenKey2))
+			{
+				static const wchar_t kVal[] = L"USB\\VID_12BA&PID_00FF";
+				pv->vt = VT_LPWSTR;
+				pv->pwszVal = (LPWSTR)CoTaskMemAlloc(sizeof(kVal));
+				if (pv->pwszVal) memcpy(pv->pwszVal, kVal, sizeof(kVal));
+				rslog::info_ts() << m_DeviceId << " PropertyStore::GetValue"
+				                    " [INJECTED PKEY_USB_DeviceId2] val=" << kVal << std::endl;
+				return pv->pwszVal ? S_OK : E_OUTOFMEMORY;
+			}
+		}
+
 		char guidStr[40];
 		const auto& g = key.fmtid;
 		sprintf_s(guidStr, sizeof(guidStr),
@@ -155,7 +243,7 @@ HRESULT STDMETHODCALLTYPE DebugWrapperDevicePropertyStore::GetValue(REFPROPERTYK
 		}
 		else
 		{
-			// Property is present — log key, type, and value for cross-driver comparison.
+			// Property is present - log key, type, and value for cross-driver comparison.
 			rslog::info_ts() << m_DeviceId << " PropertyStore::GetValue key=" << guidStr
 			                 << " pid=" << std::dec << key.pid;
 			if (keyName)
