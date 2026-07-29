@@ -4,9 +4,9 @@
 
 According to my tests, the last release ([v0.7.5-17](https://github.com/ferabreu/rocksmith-on-linux/releases/tag/v0.7.5-17)) works with [WineASIO](https://github.com/wineasio/wineasio) and [PipeASIO](https://github.com/M0n7y5/pipeasio). 
 
-Apparently, the problem with the original release (v0.7.4-2, from when I didn't know how semantic versioning works) was caused by changes in [proton-cachyos version 11.0-20260702](https://github.com/CachyOS/proton-cachyos/releases/tag/cachyos-11.0-20260702-slr), which switched from `winepulse.drv` to `winepipewire.drv`. That messed up the cable-detection routine of *rocksmith-on-linux*.
+Apparently, the problem with the original release (v0.7.4-2, from when I didn't know how semantic versioning works) was caused by changes in [proton-cachyos version 11.0-20260702](https://github.com/CachyOS/proton-cachyos/releases/tag/cachyos-11.0-20260702-slr), which switched from `winepulse.drv` to `winepipewire.drv`. That messed up the cable-detection routine.
 
-I'm not an actual programmer - I rely on IA tools to develop, specifically GitHub Copilot. The increase in the costs for using this tool will probably make it prohibitive to me after my current annual subscription runs out in 2026-07-31. So, I've used almost all my July credits to fix *rocsmith-on-linux*, and will use the few left to try to future-proof it a bit. After that, the project will probably get frozen in time.
+I'm not an actual programmer - I rely on IA tools to develop, specifically GitHub Copilot. The increase in the costs for using this tool will probably make it prohibitive to me after my current annual subscription runs out in 2026-07-31. So, I've used almost all my July credits to fix *Rocksmith on Linux*, and will use the few left to try to future-proof it a bit. After that, the project will probably get frozen in time.
 
 PipeASIO looks promising for the future of Rocksmith (2014 too): it's easier to set up with the current versions of Wine and Proton.
 
@@ -37,11 +37,11 @@ Using Ubisoft's Real Tone Cable is still required. Rocksmith does not work witho
 ### Installation and setup
 
 - Copy the files `avrt.dll`, `RS_ASIO.dll` and `RS_ASIO.ini` of [latest release](https://github.com/ferabreu/rocksmith-on-linux/releases/latest) (zip archive rocksmith-on-linux-\<VERSION\>.zip ) to the game folder.
-  - This project will follow the upstream RS ASIO versioning scheme, with an additional sub-version number to indicate changes specific to Rocksmith. For example, if the latest RS ASIO release is 0.7.4, the corresponding rocksmith-on-linux version will be 0.7.4-0, 0.7.4-1 and so on.
+  - This project will follow the upstream RS ASIO versioning scheme, with an additional sub-version number to indicate changes specific to Rocksmith. For example, if the latest RS ASIO release is 0.7.4, the corresponding *Rocksmith on Linux* version will be 0.7.4-0, 0.7.4-1 and so on.
   - Only the Steam version of Rocksmith is currently supported. You can find the local folder of the game by right clicking on it in your Steam library, and selecting menu "Manage" -> "Browse local files"
 - The `RS_ASIO.ini` file is pre-configured to be used with the game running on Linux, with the usual Proton stack and WineASIO.
 - Make sure `Rocksmith.ini` is set to run with `ExclusiveMode=1`. If in doubt, use default settings.
-- Make sure your interface clock is set to 48kHz. rocksmith-on-linux will try to request 48kHz mode, but you need to set it manually in Pipewire or JACK.
+- Make sure your interface clock is set to 48kHz. *Rocksmith on Linux* will try to request 48kHz mode, but you need to set it manually in Pipewire or JACK.
 - An `RS_ASIO.log` file is generated inside the game directory which may help diagnosing issues.
 
 ### Removal
@@ -93,7 +93,7 @@ The same instructions should work for Rocksmith as well.
 
 ## Additional technical details
 
-Additional information about how rocksmith-on-linux works, and how to configure it, can be found in the [technical details document](https://github.com/ferabreu/rocksmith-on-linux/blob/main/docs/tech-details.md). This includes information about how the WASAPI redirect works and how to match the `WasapiDevice` setting.
+Additional information about how *Rocksmith on Linux* works, and how to configure it, can be found in the [technical details document](https://github.com/ferabreu/rocksmith-on-linux/blob/main/docs/tech-details.md). This includes information about how the WASAPI redirect works and how to match the `WasapiDevice` setting.
 
 I have also included a good portion of my "development conversation" with GitHub Copilot in the [copilot-chat.md](https://github.com/ferabreu/rocksmith-on-linux/blob/main/docs/copilot-chat.md). This includes the initial specifications I gave to Copilot, and the subsequent conversation where I asked for help with implementation details, debugging and testing. It may be interesting for those who want to understand how the project was developed, or how to use GitHub Copilot for similar projects. The file also includes a section on trying to replicate full ASIO support in Wine, which was ultimately unsuccessful.
 
