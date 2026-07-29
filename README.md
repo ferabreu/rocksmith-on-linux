@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="assets/rocksmith-on-linux-logo-plain-dark.svg">
-    <img alt="Rocksmith on Linux" src="assets/rocksmith-on-linux-logo-plain-light.svg" width="480">
+    <img alt="Rocksmith on Linux" src="assets/rocksmith-on-linux-logo-plain-light.svg" width="600">
   </picture>
 </p>
 
