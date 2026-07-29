@@ -166,33 +166,50 @@ static std::optional<AsioHelpers::DriverInfo> GetWineAsioInfo()
 	static std::optional<AsioHelpers::DriverInfo> result;
 
 	static bool isFirstCall = true;
-	if (isFirstCall)
+	if (!isFirstCall)
+		return result;
+	isFirstCall = false;
+
+	// Under Wine WOW64 (64-bit Wine running a 32-bit game), 32-bit DLLs live in
+	// syswow64, not system32.  A bare LoadLibraryExA("wineasio32.dll") may not find
+	// them via the DLL search path, so we also probe explicit system32 and syswow64
+	// paths as fallbacks.
+	char sysDir[MAX_PATH] = {};
+	char wow64Dir[MAX_PATH] = {};
+	GetSystemDirectoryA(sysDir, MAX_PATH);
+	// GetSystemWow64DirectoryA returns 0 on pure 32-bit Windows; that's fine below.
+	if (!GetSystemWow64DirectoryA(wow64Dir, MAX_PATH))
+		strcpy_s(wow64Dir, "C:\\windows\\syswow64");
+
+	std::array dllNames = { "wineasio32.dll", "wineasio.dll" };
+
+	for (const char* dllName : dllNames)
 	{
-		isFirstCall = false;
+		if (result.has_value())
+			break;
 
-		std::array possibleDllNames = {
-			"wineasio32.dll",
-			"wineasio.dll"
-		};
+		rslog::info_ts() << __FUNCTION__ << " - Looking for \"" << dllName << "\"..." << std::endl;
 
-		bool keepLooking = true;
+		// Try bare name first (standard DLL search path), then explicit directories.
+		std::vector<std::string> candidates;
+		candidates.push_back(dllName);
+		if (sysDir[0])   candidates.push_back(std::string(sysDir)   + "\\" + dllName);
+		if (wow64Dir[0]) candidates.push_back(std::string(wow64Dir) + "\\" + dllName);
 
-		for (const char* dllToFind : possibleDllNames)
+		for (const auto& candidate : candidates)
 		{
-			if (!keepLooking)
-			{
+			if (result.has_value())
 				break;
-			}
 
-			rslog::info_ts() << __FUNCTION__ << " - Looking for \"" << dllToFind << "\"...";
+			rslog::info_ts() << "  Trying \"" << candidate << "\"...";
 
-			HMODULE hWineAsio = LoadLibraryExA(dllToFind, nullptr, DONT_RESOLVE_DLL_REFERENCES);
+			HMODULE hWineAsio = LoadLibraryExA(candidate.c_str(), nullptr, DONT_RESOLVE_DLL_REFERENCES);
 			if (hWineAsio)
 			{
 				char path[512] = {};
 				if (GetModuleFileNameA(hWineAsio, path, sizeof(path) - 1))
 				{
-					rslog::info << "  Loaded and found at \"" << path << "\"." << std::endl;
+					rslog::info << "  found at \"" << path << "\"." << std::endl;
 
 					AsioHelpers::DriverInfo info;
 					info.Clsid = { 0x48d0c522, 0xbfcc, 0x45cc, { 0x8b, 0x84, 0x17, 0xf2, 0x5f, 0x33, 0xe6, 0xe8 } };
@@ -202,17 +219,22 @@ static std::optional<AsioHelpers::DriverInfo> GetWineAsioInfo()
 
 					rslog::info_ts() << "  name: " << info.Name.c_str() << std::endl;
 					result = info;
-					keepLooking = false;
 				}
 				else
 				{
-					rslog::info_ts() << "  Loaded but could not get path." << std::endl;
+					rslog::info << "  loaded but GetModuleFileNameA failed." << std::endl;
 				}
 				FreeLibrary(hWineAsio);
 			}
 			else
 			{
-				rslog::info << "  Not found." << std::endl;
+				DWORD gle = GetLastError();
+				rslog::info << "  gle=" << gle;
+				if (gle == ERROR_BAD_EXE_FORMAT)
+					rslog::info << " (ERROR_BAD_EXE_FORMAT - wrong architecture: 64-bit DLL in a 32-bit process?)";
+				else if (gle == ERROR_MOD_NOT_FOUND)
+					rslog::info << " (ERROR_MOD_NOT_FOUND)";
+				rslog::info << std::endl;
 			}
 		}
 	}

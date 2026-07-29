@@ -104,19 +104,32 @@ HRESULT STDMETHODCALLTYPE DebugWrapperDevicePropertyStore::GetCount(DWORD *cProp
 		m_RealPropertyCount = *cProps;
 		rslog::info_ts() << "  *cProps: " << std::dec << *cProps;
 
-		if (m_IsCableDevice && *cProps < 10)
+		if (m_IsCableDevice)
 		{
-			// The cable device is missing the 2 USB ID properties under winepipewire.
-			// The game loops GetAt(0..count-1) + GetValue, so it only reads those
-			// properties if count is 10.  Return 10 so GetAt(8/9) are reached.
-			// GetAt will inject PKEY_USB_DeviceId1/2; GetValue will inject VID_12BA strings.
-			*cProps = 10;
-			rslog::info_ts() << " -> overriding to 10 [injecting 2 USB ID properties for cable detection]";
+			// Probe the real store to see if it already exposes the USB ID key natively
+			// (e.g., a future winepipewire that adds the properties itself).  Only inject
+			// the extra 2 entries when they are genuinely absent, and use realCount+2
+			// rather than a hardcoded 10 so we stay correct if the property count grows
+			// for unrelated reasons in future Wine/PipeWire versions.
+			PROPVARIANT pvProbe;
+			PropVariantInit(&pvProbe);
+			const bool hasUsbId =
+				SUCCEEDED(m_RealPropertyStore.GetValue(PKEY_Device_DeviceIdHiddenKey1, &pvProbe))
+				&& pvProbe.vt != VT_EMPTY;
+			PropVariantClear(&pvProbe);
+
+			if (!hasUsbId)
+			{
+				*cProps = m_RealPropertyCount + 2;
+				rslog::info_ts() << " -> overriding to " << std::dec << *cProps
+				                 << " [injecting 2 USB ID properties for cable detection;"
+				                    " real count=" << m_RealPropertyCount << "]";
+			}
+			else
+			{
+				rslog::info_ts() << " [USB ID properties present natively - no injection needed]";
+			}
 		}
-		else if (*cProps >= 10)
-			rslog::info_ts() << " [winepulse-like count - cable detection should work if this is the cable device]";
-		else if (*cProps == 8)
-			rslog::info_ts() << " [winepipewire-like count - cable detection may fail; see GetValue output below for missing properties]";
 		else if (*cProps == 0)
 			rslog::info_ts() << " [WARN: empty property store - device may be misconfigured]";
 		rslog::info_ts() << std::endl;
@@ -178,16 +191,22 @@ HRESULT STDMETHODCALLTYPE DebugWrapperDevicePropertyStore::GetValue(REFPROPERTYK
 
 	if (pv)
 	{
-		// Identify the cable device from its FriendlyName so we know when to inject.
-		if (!m_IsCableDevice && pv->vt == VT_LPWSTR && pv->pwszVal)
+		// Identify the cable device so we know when to inject.
+		// Primary signal: PKEY_Device_FriendlyName (pid=14) = "Microphone (Rocksmith Guitar Adapter Mono)"
+		// Fallback signal: Wine short-name property {026E516E...} pid=2 = "Rocksmith Guitar Adapter Mono"
+		// Both are derived from the USB iProduct descriptor burned into the cable firmware,
+		// so they are identical for every unit on every USB port.  The fallback ensures
+		// detection survives any future change to Wine's FriendlyName formatting.
+		if (!m_IsCableDevice && pv->vt == VT_LPWSTR && pv->pwszVal
+		    && wcsstr(pv->pwszVal, L"Rocksmith"))
 		{
-			// {A45C254E-DF1C-4EFD-8020-67D146A850E0} pid=14 = PKEY_Device_FriendlyName
-			static const GUID kFriendlyNameGuid = {0xa45c254e, 0xdf1c, 0x4efd, {0x80, 0x20, 0x67, 0xd1, 0x46, 0xa8, 0x50, 0xe0}};
-			if (IsEqualGUID(key.fmtid, kFriendlyNameGuid) && key.pid == 14
-			    && wcsstr(pv->pwszVal, L"Guitar Adapter"))
+			static const GUID kFriendlyName = {0xa45c254e, 0xdf1c, 0x4efd, {0x80, 0x20, 0x67, 0xd1, 0x46, 0xa8, 0x50, 0xe0}};
+			static const GUID kShortName    = {0x026e516e, 0xb814, 0x414b, {0x83, 0xcd, 0x85, 0x6d, 0x6f, 0xef, 0x48, 0x22}};
+			if ((IsEqualGUID(key.fmtid, kFriendlyName) && key.pid == 14) ||
+			    (IsEqualGUID(key.fmtid, kShortName)    && key.pid == 2))
 			{
 				m_IsCableDevice = true;
-				rslog::info_ts() << m_DeviceId << " [cable device identified from FriendlyName"
+				rslog::info_ts() << m_DeviceId << " [cable device identified"
 				                    " - will inject 2 USB ID properties to enable cable detection]" << std::endl;
 			}
 		}

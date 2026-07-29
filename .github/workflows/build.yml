@@ -38,7 +38,7 @@ jobs:
         copy "bin\Win32\${{ env.BUILD_CONFIGURATION }}\avrt.dll" "$stagingName\"
         copy "dist\RS_ASIO.ini" "$stagingName\"
         copy "LICENSE" "$stagingName\"
-        copy "README.md" "$stagingName\"
+        copy "docs\README.md" "$stagingName\"
         powershell -Command "Compress-Archive -Path '$stagingName\*' -DestinationPath '$stagingName-$env:GITHUB_REF_NAME.zip'"
 
     - name: Upload Release Assets
