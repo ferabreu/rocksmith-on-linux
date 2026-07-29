@@ -2,8 +2,8 @@
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="assets/rocksmith-on-linux-logo-plain-dark.svg">
     <img alt="Rocksmith on Linux logo" src="assets/rocksmith-on-linux-logo-plain-light.svg" width="480">
-  </picture>
-</p>[^1]
+  </picture><sup><a href="#user-content-fn-1" id="user-content-fnref-1" data-footnote-ref aria-describedby="footnote-label">1</a></sup>
+</p>
 
 ## Update
 
