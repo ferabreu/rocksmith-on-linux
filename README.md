@@ -1,4 +1,4 @@
-![rocksmith-on-linux](assets/rocksmith-logo-terminal.png)[^1]
+![Rocksmith on Linux logo](assets/rocksmith-on-linux-logo-plain-dark.svg#gh-dark-mode-only)![Rocksmith on Linux logo](assets/rocksmith-on-linux-logo-plain-light.svg#gh-light-mode-only)[^1]
 
 ## Update
 
