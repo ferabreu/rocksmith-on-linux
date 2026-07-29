@@ -5,13 +5,24 @@
   </picture>
 </p>[^1]
 
-## WARNING
+## Update
 
-When I finished developing this patch, I used it to play Rocksmith on Linux for a few weeks. Now, after some months, I tried to play again and the game does not detect the Real Tone Cable.
+According to my tests, the last release ([v0.7.5-17](https://github.com/ferabreu/rocksmith-on-linux/releases/tag/v0.7.5-17)) works with [WineASIO](https://github.com/wineasio/wineasio) and [PipeASIO](https://github.com/M0n7y5/pipeasio). 
 
-So, looks like the implementation is flimsy. I will try to find out what happened - probably some update on some point of the runtime chain broke something.
+Apparently, the problem with the original release (v0.7.4-2, from when I didn't know how semantic versioning works) was caused by changes in [proton-cachyos version 11.0-20260702](https://github.com/CachyOS/proton-cachyos/releases/tag/cachyos-11.0-20260702-slr), which switched from `winepulse.drv` to `winepipewire.drv`. That messed up the cable-detection routine of *rocksmith-on-linux*.
 
-Meanwhile, I recommend not using the patch in it's current state. I have been using Rocksmith 2014 to practice - Micael Dias' [RS ASIO](https://github.com/mdias/rs_asio) is still running strong.
+I'm not an actual programmer - I rely on IA tools to develop, specifically GitHub Copilot. The increase in the costs for using this tool will probably make it prohibitive to me after my current annual subscription runs out in 2026-07-31. So, I've used almost all my July credits to fix *rocsmith-on-linux*, and will use the few left to try to future-proof it a bit. After that, the project will probably get frozen in time.
+
+PipeASIO looks promising for the future of Rocksmith (2014 too): it's easier to set up with the current versions of Wine and Proton.
+
+My environment, updated in 2026-07-27, is composed of:
+- CachyOS
+- proton-cachyos-slr
+- Pipewire (incl. pipewire-jack and lib32-pipewire-jack)
+- WineASIO (incl. 32-bit)
+- PipeASIO (incl. 32-bit)
+
+More on this later. I'll update the release (+description) and docs in the next days - hell, at least the docs I know I can do by myself. 😅
 
 ## Intro
 
