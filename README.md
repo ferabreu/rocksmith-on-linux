@@ -53,7 +53,7 @@ Using Ubisoft's Real Tone Cable is still required. Rocksmith does not work witho
 
 ### Removal
 
-- Remove the files `avrt.dll`, `RS_ASIO.dll` and `RS_ASIO.ini` from the game folder.
+- Remove the files `avrt.dll`, `RS_ASIO.dll` and `RS_ASIO.ini` (and `RS_ASIO.log`) from the game folder.
 
 ---
 
