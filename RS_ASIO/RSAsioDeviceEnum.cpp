@@ -129,7 +129,9 @@ void RSAsioDeviceEnum::UpdateAvailableDevices()
 		}
 		else
 		{
-			rslog::error_ts() << __FUNCTION__ << " - " << "failed." << std::endl;
+			rslog::error_ts() << __FUNCTION__ << " - output ASIO driver '" << m_Config.output.asioDriverName
+			                  << "' not found or failed to load; check RS_ASIO.ini [Output] AsioDriver= name"
+			                     " matches a driver listed above and its DLL is installed" << std::endl;
 		}
 	}
 
@@ -176,7 +178,10 @@ void RSAsioDeviceEnum::UpdateAvailableDevices()
 			}
 			else
 			{
-				rslog::error_ts() << __FUNCTION__ << " - " << "failed." << std::endl;
+				rslog::error_ts() << __FUNCTION__ << " - input[" << inputIdx << "] ASIO driver '"
+				                  << inputCfg.asioDriverName
+				                  << "' not found or failed to load; check RS_ASIO.ini [Asio.InputN] AsioDriver= name"
+				                     " matches a driver listed above and its DLL is installed" << std::endl;
 			}
 		}
 

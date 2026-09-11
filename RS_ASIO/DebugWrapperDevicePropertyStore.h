@@ -19,4 +19,6 @@ public:
 private:
 	IPropertyStore& m_RealPropertyStore;
 	std::wstring m_DeviceId;
+	bool  m_IsCableDevice      = false; // set once FriendlyName "Guitar Adapter" is seen
+	DWORD m_RealPropertyCount  = 0;     // real count from the underlying store (for GetAt injection)
 };

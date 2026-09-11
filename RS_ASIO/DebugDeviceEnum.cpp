@@ -60,8 +60,6 @@ HRESULT STDMETHODCALLTYPE DebugDeviceEnum::GetDefaultAudioEndpoint(EDataFlow dat
 
 HRESULT STDMETHODCALLTYPE DebugDeviceEnum::GetDevice(LPCWSTR pwstrId, IMMDevice **ppDevice)
 {
-	rslog::info_ts() << __FUNCTION__ << " - id: " << (pwstrId ? pwstrId : L"<null>") << std::endl;
-
 	HRESULT hr = RSBaseDeviceEnum::GetDevice(pwstrId, ppDevice);
 	rslog::info_ts() << "  hr: " << HResultToStr(hr) << std::endl;
 	if (ppDevice)
@@ -156,7 +154,12 @@ void DebugDeviceEnum::UpdateAvailableDevices()
 	m_RenderDevices.UpdateDevicesFromCollection(aggregatedRenderCollection, true);
 	m_CaptureDevices.UpdateDevicesFromCollection(aggregatedCaptureCollection, true);
 
-	rslog::info_ts() << __FUNCTION__ << " - " << m_RenderDevices.size() << " render devices, " << m_CaptureDevices.size() << " capture devices" << std::endl;
+	rslog::info_ts() << __FUNCTION__ << " - " << m_RenderDevices.size() << " render devices, " << m_CaptureDevices.size() << " capture devices";
+	if (m_RenderDevices.size() == 0)
+		rslog::info_ts() << " [WARN: no render device found - game will have no audio output]";
+	if (m_CaptureDevices.size() == 0)
+		rslog::info_ts() << " [WARN: no capture devices found - cable cannot be detected by the game]";
+	rslog::info_ts() << std::endl;
 
 	m_DeviceListNeedsUpdate = false;
 }

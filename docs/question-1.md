@@ -1,0 +1,67 @@
+```console
+❯ WINEPREFIX=/mnt/orange/SteamLibrary/steamapps/compatdata/205190/pfx wine reg query "HKLM\\SYSTEM\\CurrentControlSet\\Control\\DeviceClasses\\{6994AD04-93EF-11D0-A3CC-00A0C9223196}" /s 2>&1 | head -60
+0088:fixme:keyboard:klid_from_xkb_layout Unknown variant "intl"
+0034:fixme:keyboard:klid_from_xkb_layout Unknown variant "intl"
+002c:fixme:keyboard:klid_from_xkb_layout Unknown variant "intl"
+00f8:fixme:keyboard:klid_from_xkb_layout Unknown variant "intl"
+00f8:err:setupapi:create_dest_file failed to create L"C:\\windows\\system32\\winedevice.exe" (error=80)
+00f8:err:setupapi:create_dest_file failed to create L"C:\\windows\\system32\\drivers\\mountmgr.sys" (error=80)
+0128:fixme:keyboard:klid_from_xkb_layout Unknown variant "intl"
+0128:err:setupapi:create_dest_file failed to create L"C:\\windows\\explorer.exe" (error=80)
+0128:err:setupapi:create_dest_file failed to create L"C:\\windows\\hh.exe" (error=80)
+0128:err:setupapi:create_dest_file failed to create L"C:\\windows\\notepad.exe" (error=80)
+0128:err:setupapi:create_dest_file failed to create L"C:\\windows\\regedit.exe" (error=80)
+0128:err:setupapi:create_dest_file failed to create L"C:\\windows\\system32\\explorer.exe" (error=80)
+0128:err:setupapi:create_dest_file failed to create L"C:\\windows\\system32\\iexplore.exe" (error=80)
+0128:err:setupapi:create_dest_file failed to create L"C:\\windows\\system32\\notepad.exe" (error=80)
+0128:err:setupapi:create_dest_file failed to create L"C:\\windows\\system32\\msxml.dll" (error=80)
+0128:err:setupapi:create_dest_file failed to create L"C:\\windows\\system32\\msxml2.dll" (error=80)
+0128:err:setupapi:create_dest_file failed to create L"C:\\windows\\system32\\msxml3.dll" (error=80)
+0128:err:setupapi:create_dest_file failed to create L"C:\\windows\\system32\\msxml4.dll" (error=80)
+0128:err:setupapi:create_dest_file failed to create L"C:\\windows\\system32\\msxml6.dll" (error=80)
+0128:err:setupapi:create_dest_file failed to create L"C:\\windows\\system32\\shdocvw.dll" (error=80)
+0128:err:setupapi:create_dest_file failed to create L"C:\\windows\\system32\\gecko\\plugin\\npmshtml.dll" (error=80)
+0128:err:setupapi:create_dest_file failed to create L"C:\\windows\\system32\\Speech\\Common\\sapi.dll" (error=80)
+0128:err:setupapi:create_dest_file failed to create L"C:\\windows\\system32\\Speech\\Engines\\TTS\\msttsengine.dll" (error=80)
+0128:err:setupapi:create_dest_file failed to create L"C:\\windows\\system32\\wbem\\mofcomp.exe" (error=80)
+0128:err:setupapi:create_dest_file failed to create L"C:\\windows\\system32\\wbem\\wbemdisp.dll" (error=80)
+0128:err:setupapi:create_dest_file failed to create L"C:\\windows\\system32\\wbem\\wbemprox.dll" (error=80)
+0128:err:setupapi:create_dest_file failed to create L"C:\\windows\\system32\\wbem\\wmic.exe" (error=80)
+0128:err:setupapi:create_dest_file failed to create L"C:\\windows\\system32\\wbem\\wmiutils.dll" (error=80)
+0128:err:setupapi:create_dest_file failed to create L"C:\\windows\\system32\\WindowsPowerShell\\v1.0\\powershell.exe" (error=80)
+0128:err:setupapi:create_dest_file failed to create L"C:\\Program Files\\Internet Explorer\\iexplore.exe" (error=80)
+0128:err:setupapi:create_dest_file failed to create L"C:\\Program Files\\Windows Media Player\\wmplayer.exe" (error=80)
+0128:err:setupapi:create_dest_file failed to create L"C:\\Program Files\\Windows NT\\Accessories\\wordpad.exe" (error=80)
+0128:err:setupapi:create_dest_file failed to create L"C:\\Program Files\\Common Files\\System\\OLE DB\\oledb32.dll" (error=80)
+0128:err:setupapi:create_dest_file failed to create L"C:\\Program Files\\Common Files\\System\\OLE DB\\msdaps.dll" (error=80)
+0128:err:setupapi:create_dest_file failed to create L"C:\\Program Files\\Common Files\\System\\OLE DB\\msdasql.dll" (error=80)
+0128:err:setupapi:create_dest_file failed to create L"C:\\Program Files\\Common Files\\System\\ADO\\msado15.dll" (error=80)
+0128:err:setupapi:create_dest_file failed to create L"C:\\windows\\system32\\spool\\prtprocs\\x64\\wineps.drv" (error=80)
+0128:err:setupapi:create_dest_file failed to create L"C:\\windows\\system32\\spool\\drivers\\x64\\3\\wineps.drv" (error=80)
+0128:err:setupapi:create_dest_file failed to create L"C:\\windows\\system32\\spool\\prtprocs\\x64\\winprint.dll" (error=80)
+0128:err:setupapi:create_dest_file failed to create L"C:\\windows\\system32\\drivers\\cng.sys" (error=80)
+0128:err:setupapi:create_dest_file failed to create L"C:\\windows\\system32\\drivers\\fltmgr.sys" (error=80)
+0128:err:setupapi:create_dest_file failed to create L"C:\\windows\\system32\\drivers\\hidclass.sys" (error=80)
+0128:err:setupapi:create_dest_file failed to create L"C:\\windows\\system32\\drivers\\hidparse.sys" (error=80)
+0128:err:setupapi:create_dest_file failed to create L"C:\\windows\\system32\\drivers\\http.sys" (error=80)
+0128:err:setupapi:create_dest_file failed to create L"C:\\windows\\system32\\drivers\\ksecdd.sys" (error=80)
+0128:err:setupapi:create_dest_file failed to create L"C:\\windows\\system32\\drivers\\mouhid.sys" (error=80)
+0128:err:setupapi:create_dest_file failed to create L"C:\\windows\\system32\\drivers\\mountmgr.sys" (error=80)
+0128:err:setupapi:create_dest_file failed to create L"C:\\windows\\system32\\drivers\\ndis.sys" (error=80)
+0128:err:setupapi:create_dest_file failed to create L"C:\\windows\\system32\\drivers\\netio.sys" (error=80)
+0128:err:setupapi:create_dest_file failed to create L"C:\\windows\\system32\\drivers\\nsiproxy.sys" (error=80)
+0128:err:setupapi:create_dest_file failed to create L"C:\\windows\\system32\\drivers\\scsiport.sys" (error=80)
+0128:err:setupapi:create_dest_file failed to create L"C:\\windows\\system32\\drivers\\tdi.sys" (error=80)
+0128:err:setupapi:create_dest_file failed to create L"C:\\windows\\system32\\drivers\\usbd.sys" (error=80)
+0128:err:setupapi:create_dest_file failed to create L"C:\\windows\\system32\\drivers\\winebth.sys" (error=80)
+0128:err:setupapi:create_dest_file failed to create L"C:\\windows\\system32\\drivers\\winebus.sys" (error=80)
+0128:err:setupapi:create_dest_file failed to create L"C:\\windows\\system32\\drivers\\winehid.sys" (error=80)
+0128:err:setupapi:create_dest_file failed to create L"C:\\windows\\system32\\drivers\\wineusb.sys" (error=80)
+0128:err:setupapi:create_dest_file failed to create L"C:\\windows\\system32\\drivers\\winexinput.sys" (error=80)
+0128:err:setupapi:create_dest_file failed to create L"C:\\windows\\system32\\drivers\\wmilib.sys" (error=80)
+0128:err:setupapi:create_dest_file failed to create L"C:\\windows\\system32\\acledit.dll" (error=80)
+❯ WINEPREFIX=/mnt/orange/SteamLibrary/steamapps/compatdata/205190/pfx wine reg query "HKLM\\SYSTEM\\CurrentControlSet\\Enum\\USB\\VID_12BA&PID_00FF" /s 2>&1
+0088:fixme:keyboard:klid_from_xkb_layout Unknown variant "intl"
+0034:fixme:keyboard:klid_from_xkb_layout Unknown variant "intl"
+reg: Unable to find the specified registry key
+```

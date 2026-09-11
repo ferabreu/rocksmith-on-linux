@@ -39,10 +39,7 @@ BOOL APIENTRY DllMain( HMODULE hModule,
 
 HRESULT STDAPICALLTYPE Patched_CoCreateInstance(REFCLSID rclsid, IUnknown *pUnkOuter, DWORD dwClsContext, REFIID riid, void **ppOut)
 {
-	rslog::info_ts() << "Patched_CoCreateInstance called - clsid: " << rclsid
-	                 << " riid: " << riid
-	                 << " clsctx: 0x" << std::hex << dwClsContext << std::dec
-	                 << std::endl;
+	rslog::info_ts() << "Patched_CoCreateInstance called: " << riid << std::endl;
 
 	if (!ppOut)
 		return E_POINTER;
@@ -59,12 +56,7 @@ HRESULT STDAPICALLTYPE Patched_CoCreateInstance(REFCLSID rclsid, IUnknown *pUnkO
 		return S_OK;
 	}
 
-	HRESULT hr = CoCreateInstance(rclsid, pUnkOuter, dwClsContext, riid, ppOut);
-	if (FAILED(hr))
-	{
-		rslog::info_ts() << "Patched_CoCreateInstance passthrough failed - hr: " << HResultToStr(hr) << std::endl;
-	}
-	return hr;
+	return CoCreateInstance(rclsid, pUnkOuter, dwClsContext, riid, ppOut);
 }
 
 

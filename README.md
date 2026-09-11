@@ -1,4 +1,11 @@
-![Rocksmith on Linux logo](assets/rocksmith-on-linux-logo-plain-dark.svg#gh-dark-mode-only)![Rocksmith on Linux logo](assets/rocksmith-on-linux-logo-plain-light.svg#gh-light-mode-only)[^1]
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/rocksmith-on-linux-logo-plain-dark.svg">
+    <img alt="Rocksmith on Linux" src="assets/rocksmith-on-linux-logo-plain-light.svg" width="600">
+  </picture>
+</p>
+
+[^1]
 
 ## Update
 
@@ -46,7 +53,7 @@ Using Ubisoft's Real Tone Cable is still required. Rocksmith does not work witho
 
 ### Removal
 
-- Remove the files `avrt.dll`, `RS_ASIO.dll` and `RS_ASIO.ini` from the game folder.
+- Remove the files `avrt.dll`, `RS_ASIO.dll` and `RS_ASIO.ini` (and `RS_ASIO.log`) from the game folder.
 
 ---
 
