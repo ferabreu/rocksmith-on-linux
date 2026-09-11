@@ -227,9 +227,10 @@ ASIOError AsioSharedHost::Setup(const WAVEFORMATEX& format, const DWORD bufferDu
 
 	if (m_IsSetup)
 	{
-		if (format.nSamplesPerSec != m_CurrentWaveFormat.Format.nSamplesPerSec)
+		if (format.nSamplesPerSec != m_CurrentWaveFormat.Format.nSamplesPerSec ||
+			format.wFormatTag != m_CurrentWaveFormat.Format.wFormatTag)
 		{
-			rslog::error_ts() << "  sample rate is different from a previous call to Setup()." << std::endl;
+			rslog::error_ts() << "  wave format is different from a previous call to Setup()." << std::endl;
 			return ASE_InvalidMode;
 		}
 

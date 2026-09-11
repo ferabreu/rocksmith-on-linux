@@ -75,6 +75,16 @@ HRESULT RSAsioAudioClient::Initialize(AUDCLNT_SHAREMODE ShareMode, DWORD StreamF
 
 	const bool useEventCallback = StreamFlags & AUDCLNT_STREAMFLAGS_EVENTCALLBACK;
 
+	static bool isFirstTimeCalled = true;
+	if (isFirstTimeCalled)
+	{
+		if (!useEventCallback)
+		{
+			MessageBox(GetGameWindow(), TEXT("Tried to initialize audio without using an event callback.\nDid you set Win32UltraLowLatencyMode=1 in Rocksmith.ini?"), TEXT("RS-ASIO Error"), MB_OK | MB_ICONERROR);
+		}
+		isFirstTimeCalled = false;
+	}
+
 	if (!pFormat)
 		return E_POINTER;
 
