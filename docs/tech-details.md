@@ -1,18 +1,24 @@
 # Additional technical details about rocksmith-on-linux
 
+## Move to PipeWire + PipeASIO
+
+From version 0.7.5, the recommended setup moved from WineASIO/JACK to **PipeWire + PipeASIO**. On a current Arch-based system (e.g. CachyOS) with a current Wine/Proton build, this combination is simpler to maintain: PipeASIO builds against current SysWOW64 support, needs no separate JACK server, and its registration/setup steps are more reliable than WineASIO's on recent Wine versions. See the [README](../README.md) and the [setup guide](setup-guide.md) for the full rationale and installation steps.
+
+WineASIO remains supported as a driver option (`Driver=wineasio-rsasio` in `RS_ASIO.ini`) for systems that are already JACK-centric, but PipeASIO is the default going forward.
+
 ## RS_ASIO.ini configuration
 
-The default `dist/RS_ASIO.ini` file requires the following additional configuration for Rocksmith:
+The default `assets/RS_ASIO.ini` file requires the following configuration for Rocksmith:
 
 ```ini
 [Config]
 EnableWasapiInputs=1   ; required — enables WASAPI capture device enumeration
 
 [Asio.Output]
-Driver=wineasio-rsasio
+Driver=PipeASIO  ; easier to install/register, works with SysWOW64; use wineasio-rsasio for a JACK-based setup
 
 [Asio.Input.0]
-Driver=wineasio-rsasio
+Driver=PipeASIO
 WasapiDevice=Rocksmith  ; matches the Real Tone Cable's friendly name on Wine/Proton
 ```
 
@@ -61,7 +67,7 @@ If this line is absent, the `WasapiDevice=` value did not match any enumerated c
 
 **No audio output**
 
-Verify WineASIO is installed and the `Driver=wineasio-rsasio` name matches what appears in the `RS_ASIO.log` under `AsioHelpers::FindDrivers`.
+Verify the driver named in `Driver=` (`PipeASIO` by default, or `wineasio-rsasio` if you're using WineASIO) matches what appears in the `RS_ASIO.log` under `AsioHelpers::FindDrivers`.
 
 **Crackling or dropouts**
 
@@ -91,21 +97,21 @@ Wine/Proton's WASAPI implementation rejects all audio formats offered by the gam
 
 ### Why the Real Tone Cable is required
 
-The cable is required for **enumeration**, not for audio. Rocksmith only opens a capture session when it finds and recognises the Real Tone Cable WASAPI device during its startup scan. Without the cable physically connected, Wine never enumerates that endpoint, so there is nothing for RS ASIO to intercept.
+The cable is required for **enumeration**: Rocksmith only opens a capture session when it finds and recognises the Real Tone Cable WASAPI device during its startup scan. Without the cable physically connected, Wine never enumerates that endpoint, so there is nothing for RS ASIO to intercept.
 
-Once the game activates the cable's endpoint, RS ASIO redirects that activation to an ASIO-backed audio client. The **actual guitar audio then comes from WineASIO channel 0**, which can be fed from any physical interface through the PipeWire or JACK patchbay — exactly as with Rocksmith 2014. The Real Tone Cable's audio signal is never used for anything.
+Once the game activates the cable's endpoint, RS ASIO redirects that activation to an ASIO-backed audio client. The **actual guitar audio then comes from the configured ASIO input channel** (`Channel=` in `RS_ASIO.ini`). Since the cable is itself a USB audio interface with its own 1/4" input jack, it already appears as its own PipeWire/JACK device — so the simplest and most common setup is to patch the cable's own input directly into that ASIO channel. You are not limited to this, though: any physical interface can be routed into the same ASIO channel through the PipeWire (or JACK) patchbay instead, exactly as with Rocksmith 2014.
 
-In summary: the cable's role is only to make Wine expose a WASAPI device with the right path. The audio path is:
+In summary: the cable's role is to make Wine expose a WASAPI device with the right path, and — in the default setup — to also provide the guitar's audio signal itself. The audio path is:
 
 ```
-Guitar → your audio interface → WineASIO (JACK/PipeWire) → rocksmith-on-linux → Rocksmith
+Guitar → Real Tone Cable → PipeASIO (PipeWire) or WineASIO (JACK) → rocksmith-on-linux → Rocksmith
 ```
 
 ### The RS ASIO solution for Rocksmith
 
 RS ASIO intercepts `IMMDevice::Activate` for `IAudioClient`. When the game activates the Real Tone Cable's WASAPI device, RS ASIO detects the match (via `WasapiDevice=` in the INI) and returns an ASIO-backed `RSAsioAudioClient` instead of Wine's broken implementation. The game receives audio from the configured ASIO input channel transparently.
 
-Audio format negotiation is also handled: Rocksmith offers float32 mono as its preferred format, which is compatible with WineASIO's native `ASIOSTFloat32LSB` type — no conversion needed.
+Audio format negotiation is also handled: Rocksmith offers float32 mono as its preferred format, which is compatible with the ASIO driver's native `ASIOSTFloat32LSB` type (both PipeASIO and WineASIO use it) — no conversion needed.
 
 The ASIO host is shared between output (already running for music playback) and input, using the same buffer size and sample rate. Only sample rate and buffer size are compared when a second client joins the shared host — format tag differences between output (PCM16) and input (float32 extensible) are intentionally ignored.
 
@@ -120,3 +126,32 @@ Instead, Rocksmith support patches the **Import Address Table (IAT)** directly. 
 - `CoGetInterfaceAndReleaseStream` — used to retrieve those objects on the other thread
 
 Because Rocksmith does not use ASLR (its image base is fixed at `0x00400000`), the IAT slot addresses are constant across all runs, which makes this approach reliable.
+
+---
+
+## Cable detection failure under winepipewire (fixed 2026-07)
+
+### The problem
+
+Starting with proton-cachyos 11.0-20260702, `winepipewire.drv` replaced `winepulse.drv` as the default Wine audio driver. After this change, Rocksmith stopped detecting the Real Tone Cable — the tuner screen kept asking to connect it even with the cable plugged in and enumerated correctly by RS ASIO.
+
+Rocksmith identifies the cable by scanning `IPropertyStore` properties on every enumerated WASAPI capture endpoint until it finds one containing the cable's USB VID/PID (`VID_12BA&PID_00FF`). It does this via the standard COM enumeration pattern: `GetCount()` to get the property count, then `GetAt(0..count-1)` to retrieve each property key, then `GetValue(key)` to read it.
+
+Under `winepulse`, the cable's endpoint exposed 10 properties, two of which contained the VID/PID string. Under `winepipewire`, the same endpoint exposes only 8 properties — the two USB identification entries are absent. Since the game's loop only goes up to `count - 1`, it never reaches the properties that would have identified the cable, and detection silently fails with no error.
+
+### The fix
+
+`DebugWrapperDevicePropertyStore` (the wrapper RS ASIO places around every WASAPI device's property store) now detects the cable and injects the two missing properties on demand:
+
+1. **Cable identification** (`GetValue`): the first time a property value contains the substring `"Rocksmith"` in a property known to hold the device name (`PKEY_Device_FriendlyName`, or Wine's internal short-name property), the wrapper marks that device as the cable (`m_IsCableDevice`).
+2. **Count override** (`GetCount`): for the cable device, the wrapper probes whether the real store already has the USB ID property. If not, it reports `realCount + 2` instead of the real count, so the game's enumeration loop reaches two extra indices.
+3. **Key injection** (`GetAt`): for indices at or beyond the real count, the wrapper returns two synthetic property keys (`PKEY_Device_DeviceIdHiddenKey1`/`2`) instead of delegating to the real store.
+4. **Value injection** (`GetValue`): when the game asks for those two synthetic keys, the wrapper returns literal strings containing `VID_12BA&PID_00FF` (the values a `winepulse` cable endpoint would have provided), satisfying the game's detection check.
+
+This makes the fake properties indistinguishable from what the game already expected to find under `winepulse`, without needing to patch the game itself or depend on a specific Wine audio driver.
+
+### Design notes for future maintenance
+
+- Detection uses `"Rocksmith"` rather than a longer phrase, since it's the shortest substring guaranteed to appear in the cable's USB product string on every unit, regardless of USB port or system.
+- The count override uses `realCount + 2` rather than a hardcoded value, and skips injection entirely if the real store already exposes the USB ID property — so the fix keeps working even if a future Wine/PipeWire version changes the baseline property count, or starts exposing the USB ID natively.
+- This relies on the property enumeration always following `GetCount` → `GetAt` → `GetValue`, which is the only order that makes sense for a caller that doesn't already know the property count in advance.

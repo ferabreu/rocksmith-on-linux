@@ -41,7 +41,7 @@ jobs:
         copy "assets\pipeasio-register" "$stagingName\"
         copy "LICENSE" "$stagingName\"
         copy "docs\README.md" "$stagingName\"
-        copy "docs\setup.md" "$stagingName\"
+        copy "docs\setup-guide.md" "$stagingName\"
         powershell -Command "Compress-Archive -Path '$stagingName\*' -DestinationPath '$stagingName-$env:GITHUB_REF_NAME.zip'"
 
     - name: Upload Release Assets

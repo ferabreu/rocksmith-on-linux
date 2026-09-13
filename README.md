@@ -7,7 +7,7 @@
 
 ## Intro
 
-*Rocksmith on Linux* a patch that adds ASIO support to Ubisoft's **Rocksmith**, allowing the game to be run on Linux using Proton, PipeWire and an ASIO driver for Wine.
+*Rocksmith on Linux* is a patch that adds ASIO support to Ubisoft's **Rocksmith**, allowing the game to be run on Linux using Proton, PipeWire and an ASIO driver for Wine.
 
 This project is a fork of [RS ASIO](https://github.com/mdias/rs_asio), by Micael Dias, modified to work on Rocksmith. Rocksmith is different from *Rocksmith 2014* in how it handles audio, and the original RS ASIO mod doesn't work with it. 
 
@@ -22,22 +22,22 @@ In my experience, using this patch while running the game on a relatively modern
 - The original Ubisoft/Hercules *Real Tone Cable* (also known as *Rocksmith USB Guitar Adapter*).
 - A Linux-based OS correctly configured, including:
   - PipeWire (with the `pipewire-jack` module)
-  - PipeASIO
+  - [PipeASIO](https://github.com/M0n7y5/pipeasio)
   - Steam (and Proton)
-- Steam's version of Rocksmith installed and [correctly set up](docs/setup.md).
+- Steam's version of Rocksmith installed and [correctly set up](docs/setup-guide.md).
 
-From version 0.7.5, I'm focusing on running the game with PipeWire and PipeASIO - this setup has [made the whole config process much easier](docs/setup.md) for me, for running both Rocksmith and Rocksmith 2014.
+From version 0.7.5 onwards, I'm focusing on running the game with PipeWire and PipeASIO - this setup has [made the whole config process much easier](docs/setup-guide.md) for me, for running both Rocksmith and Rocksmith 2014.
 
 I have tested only the Steam version of Rocksmith - so, I cannot assume other versions will work.
 
 ### Installation
 
 - Copy the files `avrt.dll`, `RS_ASIO.dll`, `RS_ASIO.ini` and `rocksmith-on-linux.sh` from the [latest release](https://github.com/ferabreu/rocksmith-on-linux/releases/latest) (zip archive rocksmith-on-linux-\<VERSION\>.zip) to the game folder.
-  - The `RS_ASIO.ini` file is pre-configured to be used with the recommended environment. You may alter it as needed.
+  - The `RS_ASIO.ini` file is pre-configured to be used with the recommended environment.
 
-### Setup/Config
+### Configuration
 
-Check the [setup guide](docs/setup.md).
+Check the [setup guide](docs/setup-guide.md).
 
 ### Removal
 
@@ -48,7 +48,7 @@ Check the [setup guide](docs/setup.md).
 ## Known issues
 
 - Only works with the original Ubisoft/Hercules *Real Tone Cable* (also known as *Rocksmith USB Guitar Adapter*).
-- 32-bit game, 32-bit problems. PipeASIO simplified this greatly, because it allows using Windows' SysWOW64 under Proton versions that support it. Check the [setup guide](docs/setup.md).
+- 32-bit game, 32-bit problems. PipeASIO simplifies this greatly, because it allows using Windows' SysWOW64 under Proton versions that support it. Check the [setup guide](docs/setup-guide.md).
 - Hardware hotplugging while the game is running won't be noticed by the game.
 - Sometimes, the game will not start. That's probably a momentary issue. Just try again and it should work.
 - I'll attempt to follow the upstream RS ASIO versioning scheme and bring its improvements to this fork. However, because of the local changes, not all updates will be appliable/carried over.
@@ -78,9 +78,13 @@ Check the [setup guide](docs/setup.md).
 
 ## Additional technical details
 
-Additional information about how *Rocksmith on Linux* works, and how to configure it, can be found in the [technical details document](https://github.com/ferabreu/rocksmith-on-linux/blob/main/docs/tech-details.md). This includes information about how the WASAPI redirect works and how to match the `WasapiDevice` setting.
+Additional information about how *Rocksmith on Linux* works, and how to configure it, can be found in the [technical details document](docs/tech-details.md). This includes information about how the WASAPI redirect works and how to match the `WasapiDevice` setting.
 
-I have also included a good portion of my "development conversation" with GitHub Copilot in the [copilot-chat.md](https://github.com/ferabreu/rocksmith-on-linux/blob/main/docs/copilot-chat.md). This includes the initial specifications I gave to Copilot, and the subsequent conversation where I asked for help with implementation details, debugging and testing. It may be interesting for those who want to understand how the project was developed, or how to use GitHub Copilot for similar projects. The file also includes a section on trying to replicate full ASIO support in Wine, which was ultimately unsuccessful.
+I have also included a good portion of my "development conversations" with GitHub Copilot in [docs/copilot-sessions](docs/copilot-sessions):
+- [01-copilot-chat.md](docs/copilot-sessions/01-copilot-chat.md) covers the initial specifications I gave to Copilot, and the subsequent conversation where I asked for help with implementation details, debugging and testing (including a section on trying to replicate full ASIO support in Wine, which was ultimately unsuccessful).
+- [02-gpt53codex.md](docs/copilot-sessions/02-gpt53codex.md) and [03-cable-detect-failure.md](docs/copilot-sessions/03-cable-detect-failure.md) cover later sessions diagnosing and fixing cable-detection regressions caused by Wine/Proton updates.
+
+These may be interesting for those who want to understand how the project was developed, or how to use GitHub Copilot for similar projects.
 
 ---
 
