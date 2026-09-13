@@ -1,90 +1,68 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="assets/rocksmith-on-linux-logo-plain-dark.svg">
-    <img alt="Rocksmith on Linux" src="assets/rocksmith-on-linux-logo-plain-light.svg" width="600">
-  </picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/rocksmith-on-linux-logo-plain-dark.svg">
+    <img alt="Rocksmith on Linux" src="docs/assets/rocksmith-on-linux-logo-plain-light.svg" width="600">
+  </picture>[^1]
 </p>
-
-[^1]
-
-## Update
-
-According to my tests, the last release ([v0.7.5-17](https://github.com/ferabreu/rocksmith-on-linux/releases/tag/v0.7.5-17)) works with [WineASIO](https://github.com/wineasio/wineasio) and [PipeASIO](https://github.com/M0n7y5/pipeasio). 
-
-Apparently, the problem with the original release (v0.7.4-2, from when I didn't know how semantic versioning works) was caused by changes in [proton-cachyos version 11.0-20260702](https://github.com/CachyOS/proton-cachyos/releases/tag/cachyos-11.0-20260702-slr), which switched from `winepulse.drv` to `winepipewire.drv`. That messed up the cable-detection routine.
-
-I'm not an actual programmer - I rely on IA tools to develop, specifically GitHub Copilot. The increase in the costs for using this tool will probably make it prohibitive to me after my current annual subscription runs out in 2026-07-31. So, I've used almost all my July credits to fix *Rocksmith on Linux*, and will use the few left to try to future-proof it a bit. After that, the project will probably get frozen in time.
-
-PipeASIO looks promising for the future of Rocksmith (2014 too): it's easier to set up with the current versions of Wine and Proton.
-
-My environment, updated in 2026-07-27, is composed of:
-- CachyOS
-- proton-cachyos-slr
-- Pipewire (incl. pipewire-jack and lib32-pipewire-jack)
-- WineASIO (incl. 32-bit)
-- PipeASIO (incl. 32-bit)
-
-More on this later. I'll update the release (+description) and docs in the next days - hell, at least the docs I know I can do by myself. 😅
 
 ## Intro
 
-This project aims to add ASIO support to Ubisoft's **Rocksmith**, allowing the game to be run on Linux, using Steam/Proton, Pipewire (or JACK), and WineASIO.
+*Rocksmith on Linux* a patch that adds ASIO support to Ubisoft's **Rocksmith**, allowing the game to be run on Linux using Proton, PipeWire and an ASIO driver for Wine.
 
-Rocksmith is different from Rocksmith 2014 in how it handles audio, and the original RS ASIO mod doesn't work with it. This project is a fork of RS ASIO, with changes to make it compatible with Rocksmith.
+This project is a fork of [RS ASIO](https://github.com/mdias/rs_asio), by Micael Dias, modified to work on Rocksmith. Rocksmith is different from *Rocksmith 2014* in how it handles audio, and the original RS ASIO mod doesn't work with it. 
 
-Using Ubisoft's Real Tone Cable is still required. Rocksmith does not work without it. Because of that, the only practical purpose of this mod is to allow the game to run on Linux with WineASIO, which should improve audio latency and performance compared to using Wine's built-in audio drivers.
+Using Ubisoft's Real Tone Cable is still required. Rocksmith does not work without it. Because of that, the only practical purpose of this mod is to allow the game to run on Linux with low latency and good performance.
+
+In my experience, using this patch while running the game on a relatively modern Linux system makes it playable as if it were running on Windows. On a modern machine, PipeWire makes it possible to get really low latency and redirect the audio output in useful/creative ways, like for recording or listening to your playing's "raw tone" (this is especially useful, since Rocksmith makes your tone better than it would sound in a real live scenario).
 
 ## How to use
 
 ### Requirements
 
 - The original Ubisoft/Hercules *Real Tone Cable* (also known as *Rocksmith USB Guitar Adapter*).
-- Steam's version of Rocksmith installed and set up according to [**Nizo's "Rocksmith 2014 on Linux"**](https://codeberg.org/nizo/linux-rocksmith) guide.
+- A Linux-based OS correctly configured, including:
+  - PipeWire (with the `pipewire-jack` module)
+  - PipeASIO
+  - Steam (and Proton)
+- Steam's version of Rocksmith installed and [correctly set up](docs/setup.md).
 
-### Installation and setup
+From version 0.7.5, I'm focusing on running the game with PipeWire and PipeASIO - this setup has [made the whole config process much easier](docs/setup.md) for me, for running both Rocksmith and Rocksmith 2014.
 
-- Copy the files `avrt.dll`, `RS_ASIO.dll` and `RS_ASIO.ini` of [latest release](https://github.com/ferabreu/rocksmith-on-linux/releases/latest) (zip archive rocksmith-on-linux-\<VERSION\>.zip ) to the game folder.
-  - This project will follow the upstream RS ASIO versioning scheme, with an additional sub-version number to indicate changes specific to Rocksmith. For example, if the latest RS ASIO release is 0.7.4, the corresponding *Rocksmith on Linux* version will be 0.7.4-0, 0.7.4-1 and so on.
-  - Only the Steam version of Rocksmith is currently supported. You can find the local folder of the game by right clicking on it in your Steam library, and selecting menu "Manage" -> "Browse local files"
-- The `RS_ASIO.ini` file is pre-configured to be used with the game running on Linux, with the usual Proton stack and WineASIO.
-- Make sure `Rocksmith.ini` is set to run with `ExclusiveMode=1`. If in doubt, use default settings.
-- Make sure your interface clock is set to 48kHz. *Rocksmith on Linux* will try to request 48kHz mode, but you need to set it manually in Pipewire or JACK.
-- An `RS_ASIO.log` file is generated inside the game directory which may help diagnosing issues.
+I have tested only the Steam version of Rocksmith - so, I cannot assume other versions will work.
+
+### Installation
+
+- Copy the files `avrt.dll`, `RS_ASIO.dll`, `RS_ASIO.ini` and `rocksmith-on-linux.sh` from the [latest release](https://github.com/ferabreu/rocksmith-on-linux/releases/latest) (zip archive rocksmith-on-linux-\<VERSION\>.zip) to the game folder.
+  - The `RS_ASIO.ini` file is pre-configured to be used with the recommended environment. You may alter it as needed.
+
+### Setup/Config
+
+Check the [setup guide](docs/setup.md).
 
 ### Removal
 
-- Remove the files `avrt.dll`, `RS_ASIO.dll` and `RS_ASIO.ini` (and `RS_ASIO.log`) from the game folder.
-
----
-
-## Linux setup instructions
-
-[**Nizo's "Rocksmith 2014 on Linux"**](https://codeberg.org/nizo/linux-rocksmith) guide covers setting up Rocksmith 2014 on Arch, Debian, Fedora, SteamOS and NixOS-derived distributions, using PipeWire or JACK as the audio system. The guide includes instructions for Steam/Proton, troubleshooting tips and performance optimizations. Check it out at [nizo/linux-rocksmith](https://codeberg.org/nizo/linux-rocksmith) (CC-BY-SA-4.0).
-
-The same instructions should work for Rocksmith as well.
+- Remove the copied files (and `RS_ASIO.log`) from the game folder.
 
 ---
 
 ## Known issues
 
 - Only works with the original Ubisoft/Hercules *Real Tone Cable* (also known as *Rocksmith USB Guitar Adapter*).
-  - The branch `asio-support` contains an ongoing attempt to add support for other ASIO interfaces, but it's not working yet. If you want to help with that, check the branch and the files:
-    - [asio-support-report.md](https://github.com/ferabreu/rocksmith-on-linux/blob/asio-support/docs/asio-support-report.md)
-    - [failed-asio-support-chat.md](https://github.com/ferabreu/rocksmith-on-linux/blob/asio-support/docs/failed-asio-support-chat.md)
-      - It's not really a "failure" - I was just upset. 😅 Adding support for other ASIO interfaces is still a goal, but it will require significant changes to the code and a better understanding of how ASIO works in Wine.
-- Both Wine and WineASIO must support 32-bit.
+- 32-bit game, 32-bit problems. PipeASIO simplified this greatly, because it allows using Windows' SysWOW64 under Proton versions that support it. Check the [setup guide](docs/setup.md).
 - Hardware hotplugging while the game is running won't be noticed by the game.
-- Sometimes, the game will not start. That's probably a momentary issue with WineASIO or the way the game initializes audio devices. Just try again and it should work.
-
+- Sometimes, the game will not start. That's probably a momentary issue. Just try again and it should work.
+- I'll attempt to follow the upstream RS ASIO versioning scheme and bring its improvements to this fork. However, because of the local changes, not all updates will be appliable/carried over.
+  
 ---
 
 ## Disclaimer
 
 **Testing and Limitations:**
-- This software has not been exhaustively tested.
+- I made this software for my personal use.
+- I tested this software only for me. It has not been exhaustively tested.
 - Basic functionality has been verified:
   - with a single Real Tone Cable
-  - in a single Linux environment based on Manjaro Linux, using Steam/Proton, PipeWire, and WineASIO.
+  - in a single Linux environment based on CachyOS Linux, using Steam/Proton, PipeWire, and PipeASIO.
 - It may not work in all possible environments and configurations.
 
 **No Warranty:**
@@ -93,7 +71,7 @@ The same instructions should work for Rocksmith as well.
 - Use at your own risk.
 
 **Legal Notice:**
-- Rocksmith and Rocksmith 2014 are trademarks and properties of Ubisoft.
+- *Rocksmith* and *Rocksmith 2014* are trademarks and properties of Ubisoft.
 - This project is an independent effort and is not affiliated with, endorsed by, or approved by Ubisoft.
 
 ---
@@ -108,7 +86,7 @@ I have also included a good portion of my "development conversation" with GitHub
 
 ## Credits
 
-Developed with the assistance of GitHub Copilot, Claude Sonnet 4.6 and Claude Haiku 4.5, based on my specs.
+Developed with the assistance of GitHub Copilot, Claude Sonnet 4.6/5 and Claude Haiku 4.5, based on my specs.
 
 This project is a fork of [RS ASIO](https://github.com/mdias/rs_asio), by Micael Dias, without which this project would not be possible. RS ASIO is still being maintained and developed, and I recommend checking it out if you want to use ASIO with Rocksmith 2014.
 

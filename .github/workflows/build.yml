@@ -36,9 +36,12 @@ jobs:
         mkdir $stagingName
         copy "bin\Win32\${{ env.BUILD_CONFIGURATION }}\RS_ASIO.dll" "$stagingName\"
         copy "bin\Win32\${{ env.BUILD_CONFIGURATION }}\avrt.dll" "$stagingName\"
-        copy "dist\RS_ASIO.ini" "$stagingName\"
+        copy "assets\RS_ASIO.ini" "$stagingName\"
+        copy "assets\rocksmith-on-linux.sh" "$stagingName\"
+        copy "assets\pipeasio-register" "$stagingName\"
         copy "LICENSE" "$stagingName\"
         copy "docs\README.md" "$stagingName\"
+        copy "docs\setup.md" "$stagingName\"
         powershell -Command "Compress-Archive -Path '$stagingName\*' -DestinationPath '$stagingName-$env:GITHUB_REF_NAME.zip'"
 
     - name: Upload Release Assets
