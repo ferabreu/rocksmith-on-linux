@@ -14,14 +14,14 @@ In my experience, using this patch while running the game on a relatively modern
 
 - The original Ubisoft/Hercules *Real Tone Cable* (also known as *Rocksmith USB Guitar Adapter*).
 - A Linux-based OS correctly configured, including:
-  - PipeWire (with the `pipewire-jack` module)
-  - [PipeASIO](https://github.com/M0n7y5/pipeasio)
+  - PipeWire
+  - [PipeASIO](https://github.com/M0n7y5/pipeasio), which talks to PipeWire directly and does not need JACK or the `pipewire-jack` module (only required if you use WineASIO instead)
   - Steam (and Proton)
 - Steam's version of Rocksmith installed and correctly set up (see [setup-guide.md](setup-guide.md), included in this package).
 
-From version 0.7.5 onwards, this project focuses on running the game with PipeWire and PipeASIO — this setup has made the whole configuration process much easier, for running both Rocksmith and Rocksmith 2014. WineASIO/JACK is also supported as an alternative — see the setup guide for that path.
+From version 0.7.5-rs1.1 onwards, this project focuses on running the game with PipeWire and PipeASIO — this setup has made the whole configuration process much easier, for running both Rocksmith and Rocksmith 2014. WineASIO/JACK is also supported as an alternative — see the setup guide for that path.
 
-I have tested only the Steam version of Rocksmith - so, I cannot assume other versions will work.
+I have tested only the Steam version of Rocksmith - so, I cannot assume other versions will work. Also, I run CachyOS, and have not tested any other Linux Systems. Arch-based distros would probably require minor modifications for setting this up.
 
 ### Installation
 
@@ -47,6 +47,7 @@ Check [setup-guide.md](setup-guide.md), included in this package.
 - Hardware hotplugging while the game is running won't be noticed by the game.
 - Sometimes, the game will not start. That's probably a momentary issue. Just try again and it should work.
 - I'll attempt to follow the upstream RS ASIO versioning scheme and bring its improvements to this fork. However, because of the local changes, not all updates will be appliable/carried over.
+  - RS ASIO v0.7.5 --> Rocksmith on Linux v0.7.5.rs1."x".
 
 ---
 

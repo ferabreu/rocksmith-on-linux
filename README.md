@@ -21,8 +21,8 @@ In my experience, using this patch while running the game on a relatively modern
 
 - The original Ubisoft/Hercules *Real Tone Cable* (also known as *Rocksmith USB Guitar Adapter*).
 - A Linux-based OS correctly configured, including:
-  - PipeWire (with the `pipewire-jack` module)
-  - [PipeASIO](https://github.com/M0n7y5/pipeasio)
+  - PipeWire
+  - [PipeASIO](https://github.com/M0n7y5/pipeasio), which talks to PipeWire directly and does not need JACK or the `pipewire-jack` module (only required if you use WineASIO instead)
   - Steam (and Proton)
 - Steam's version of Rocksmith installed and [correctly set up](docs/setup-guide.md).
 
@@ -85,6 +85,8 @@ I have also included a good portion of my "development conversations" with GitHu
 - [02-gpt53codex.md](docs/copilot-sessions/02-gpt53codex.md) and [03-cable-detect-failure.md](docs/copilot-sessions/03-cable-detect-failure.md) cover later sessions diagnosing and fixing cable-detection regressions caused by Wine/Proton updates.
 
 These may be interesting for those who want to understand how the project was developed, or how to use GitHub Copilot for similar projects.
+
+If you're on an older system still using PulseAudio, it may be possible to use the patch with WineASIO and JACK instead of PipeASIO/PipeWire. Proton's audio driver can be selected with the `WINE_AUDIO_DRIVER` environment variable (the default fallback list is `pipewire,pulse,alsa`) — setting it to `pulse` forces PulseAudio. This isn't an officially supported path, just a possibility worth mentioning. See the [technical details document](docs/tech-details.md) for the Proton/Wine specifics.
 
 ---
 

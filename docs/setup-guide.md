@@ -5,7 +5,6 @@
 **CachyOS Linux** (includes **PipeWire**)
 
 - **Required packages**:
-  - `pipewire-jack`
   - `cachyos-gaming-meta` and `cachyos-gaming-applications` (check the [Gaming with CachyOS Guide](https://wiki.cachyos.org/configuration/gaming))
   - `mingw-w64-gcc`
 
@@ -80,4 +79,7 @@ You should try reducing the latency, too. I prefer to do that by directly editin
 
 This guide works for both *Rocksmith*, using Rocksmith on Linux, and *Rocksmith 2014*, using [RS ASIO](https://github.com/mdias/rs_asio). If you want to use the shell script provided here to run 2014, you will have to modify the game id number from 205190 to 221680.
 
-I originally relied on information from [Nizo's "Rocksmith 2014 on Linux"](https://codeberg.org/nizo/linux-rocksmith): the guide covers setting up Rocksmith 2014 on Arch, Debian, Fedora, SteamOS and NixOS-derived distributions, using PipeWire or JACK as the audio system. The guide includes instructions for Steam/Proton, troubleshooting tips and performance optimizations. Check it out at [nizo/linux-rocksmith](https://codeberg.org/nizo/linux-rocksmith) (CC-BY-SA-4.0). Since my current setup relies on PipeWire and PipeASIO, Nizo's guide is not really appliable here anymore - but it may be useful for those who prefer to use WineASIO, JACK, or alternative approaches.
+`pipewire-jack` is **not** required for PipeASIO — it talks to PipeWire directly via `libpipewire-0.3`, with no JACK dependency. Only install it if you plan to use WineASIO/JACK instead. It would also be required to routing the audio signal to other JACK dependant applications, like Guitarix.
+
+I originally relied on information from [Nizo's "Rocksmith 2014 on Linux"](https://codeberg.org/nizo/linux-rocksmith): the guide covers setting up Rocksmith 2014 on Arch, Debian, Fedora, SteamOS and NixOS-derived distributions, using PipeWire or JACK as the audio system. The guide includes instructions for Steam/Proton, troubleshooting tips and performance optimizations, and has good information on build suitable startup scripts. Check it out at [nizo/linux-rocksmith](https://codeberg.org/nizo/linux-rocksmith) (CC-BY-SA-4.0).
+Since my current setup relies on PipeWire and PipeASIO, Nizo's guide is not really appliable here anymore - but it may be useful for those who prefer to use WineASIO, JACK, custom startup scripts, or alternative approaches.
