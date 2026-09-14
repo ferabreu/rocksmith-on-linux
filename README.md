@@ -2,7 +2,7 @@
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/assets/rocksmith-on-linux-logo-plain-dark.svg">
     <img alt="Rocksmith on Linux" src="docs/assets/rocksmith-on-linux-logo-plain-light.svg" width="600">
-  </picture>[^1]
+  </picture>
 </p>
 
 ## Intro
@@ -73,6 +73,7 @@ Check the [setup guide](docs/setup-guide.md).
 **Legal Notice:**
 - *Rocksmith* and *Rocksmith 2014* are trademarks and properties of Ubisoft.
 - This project is an independent effort and is not affiliated with, endorsed by, or approved by Ubisoft.
+- The logo displayed above is a modified version of the original Rocksmith logo, created by Ubisoft, and is used here for informational purposes only, to indicate that the project is related to Rocksmith. The logo and branding are protected and cannot be used for commercial purposes without authorization from Ubisoft.
 
 ---
 
@@ -96,4 +97,3 @@ Developed with the assistance of GitHub Copilot, Claude Sonnet 4.6/5 and Claude 
 
 This project is a fork of [RS ASIO](https://github.com/mdias/rs_asio), by Micael Dias, without which this project would not be possible. RS ASIO is still being maintained and developed, and I recommend checking it out if you want to use ASIO with Rocksmith 2014.
 
-[^1]: The logo is a modified version of the original Rocksmith logo, created by Ubisoft. The logo and branding are protected, meaning they cannot be used for commercial purposes without authorization from Ubisoft. This project is an independent effort and is not affiliated with, endorsed by, or approved by Ubisoft. The logo is used here for informational purposes only, to indicate that the project is related to Rocksmith.
