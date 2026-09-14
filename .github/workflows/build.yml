@@ -38,7 +38,6 @@ jobs:
         copy "bin\Win32\${{ env.BUILD_CONFIGURATION }}\avrt.dll" "$stagingName\"
         copy "assets\RS_ASIO.ini" "$stagingName\"
         copy "assets\rocksmith-on-linux.sh" "$stagingName\"
-        copy "assets\pipeasio-register" "$stagingName\"
         copy "LICENSE" "$stagingName\"
         copy "docs\README.md" "$stagingName\"
         copy "docs\setup-guide.md" "$stagingName\"
