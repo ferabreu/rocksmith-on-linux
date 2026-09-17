@@ -131,17 +131,23 @@ Because Rocksmith does not use ASLR (its image base is fixed at `0x00400000`), t
 
 ## Cable detection failure under winepipewire (fixed 2026-07)
 
-### The problem
+Starting with proton-cachyos 11.0-20260702, `winepipewire.drv` replaced `winepulse.drv` as the default Wine audio driver. This broke Rocksmith's cable detection in two separate, sequential ways — both had to be fixed before the game could see the cable again.
 
-Starting with proton-cachyos 11.0-20260702, `winepipewire.drv` replaced `winepulse.drv` as the default Wine audio driver. After this change, Rocksmith stopped detecting the Real Tone Cable — the tuner screen kept asking to connect it even with the cable plugged in and enumerated correctly by RS ASIO.
+### 1. SetupAPI enumeration failure (device not found at all)
 
-Rocksmith identifies the cable by scanning `IPropertyStore` properties on every enumerated WASAPI capture endpoint until it finds one containing the cable's USB VID/PID (`VID_12BA&PID_00FF`). It does this via the standard COM enumeration pattern: `GetCount()` to get the property count, then `GetAt(0..count-1)` to retrieve each property key, then `GetValue(key)` to read it.
+**The problem**: Before ever touching WASAPI, Rocksmith checks Wine's SetupAPI for the presence of a KS audio device. Under `winepulse`, Wine's audio backend registered the Real Tone Cable in the KS device class registry (`HKLM\SYSTEM\CurrentControlSet\Control\DeviceClasses\{KSCATEGORY_AUDIO}` and `Enum\USB\VID_12BA&PID_00FF`) as a side effect of its own USB PnP handling. `winepipewire` performs no such registration, so `SetupDiGetClassDevsA`/`SetupDiEnumDeviceInterfaces` find nothing — the tuner screen keeps asking for the cable even though it's plugged in and already visible to WASAPI.
+
+Forcing `WINE_AUDIO_DRIVER=pulse` restores the registration, but is not a viable workaround: Wine 11.14's `winepulse` path calls the still-unimplemented `SetupDiGetDeviceInterfaceAlias`, aborting the process (`wine: Call from ... to unimplemented function setupapi.dll.SetupDiGetDeviceInterfaceAlias, aborting`). The driver choice is also cached in the Proton prefix's registry (`HKCU\Software\Wine\Drivers`), so reverting to `winepipewire` afterwards doesn't undo the crash until that cached value is cleared too.
+
+**The fix**: `EnsureRealToneCableRegistered()` (`RS_ASIO/Patcher_e0f686e0.cpp`) runs before the game's IAT patches are installed and creates the missing KS device class registry entries itself, based on the fact that WASAPI already confirms the cable is present. Wine's real `SetupDiGetClassDevsA` then finds these entries naturally — no fake hooks, no synthesized SetupAPI responses. The `FriendlyName` used (`"Rocksmith USB Guitar Adapter"`) is the cable's actual USB descriptor product string (confirmed via `lsusb -v`).
+
+### 2. IPropertyStore property count mismatch (device found but not identified)
+
+**The problem**: Once SetupAPI finds the device, Rocksmith identifies it as the *specific* Real Tone Cable by scanning `IPropertyStore` properties on every enumerated WASAPI capture endpoint until it finds one containing the cable's USB VID/PID (`VID_12BA&PID_00FF`). It does this via the standard COM enumeration pattern: `GetCount()` to get the property count, then `GetAt(0..count-1)` to retrieve each property key, then `GetValue(key)` to read it.
 
 Under `winepulse`, the cable's endpoint exposed 10 properties, two of which contained the VID/PID string. Under `winepipewire`, the same endpoint exposes only 8 properties — the two USB identification entries are absent. Since the game's loop only goes up to `count - 1`, it never reaches the properties that would have identified the cable, and detection silently fails with no error.
 
-### The fix
-
-`DebugWrapperDevicePropertyStore` (the wrapper RS ASIO places around every WASAPI device's property store) now detects the cable and injects the two missing properties on demand:
+**The fix**: `DebugWrapperDevicePropertyStore` (the wrapper RS ASIO places around every WASAPI device's property store) now detects the cable and injects the two missing properties on demand:
 
 1. **Cable identification** (`GetValue`): the first time a property value contains the substring `"Rocksmith"` in a property known to hold the device name (`PKEY_Device_FriendlyName`, or Wine's internal short-name property), the wrapper marks that device as the cable (`m_IsCableDevice`).
 2. **Count override** (`GetCount`): for the cable device, the wrapper probes whether the real store already has the USB ID property. If not, it reports `realCount + 2` instead of the real count, so the game's enumeration loop reaches two extra indices.
