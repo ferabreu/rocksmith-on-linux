@@ -69,6 +69,15 @@ HRESULT RSAsioAudioClient::QueryInterface(REFIID riid, void **ppvObject)
 	return ComBaseUnknown<IAudioClient3>::QueryInterface(riid, ppvObject);
 }
 
+// Set by RSAsioAudioClient_SetPollingModeExpected(); true for RS2011, which
+// always polls and has no Win32UltraLowLatencyMode setting to suggest.
+static bool s_expectPollingMode = false;
+
+void RSAsioAudioClient_SetPollingModeExpected(bool expected)
+{
+	s_expectPollingMode = expected;
+}
+
 HRESULT RSAsioAudioClient::Initialize(AUDCLNT_SHAREMODE ShareMode, DWORD StreamFlags, REFERENCE_TIME hnsBufferDuration, REFERENCE_TIME hnsPeriodicity, const WAVEFORMATEX *pFormat, LPCGUID AudioSessionGuid)
 {
 	std::lock_guard<std::mutex> g(m_controlMutex);
@@ -78,7 +87,7 @@ HRESULT RSAsioAudioClient::Initialize(AUDCLNT_SHAREMODE ShareMode, DWORD StreamF
 	static bool isFirstTimeCalled = true;
 	if (isFirstTimeCalled)
 	{
-		if (!useEventCallback)
+		if (!useEventCallback && !s_expectPollingMode)
 		{
 			MessageBox(GetGameWindow(), TEXT("Tried to initialize audio without using an event callback.\nDid you set Win32UltraLowLatencyMode=1 in Rocksmith.ini?"), TEXT("RS-ASIO Error"), MB_OK | MB_ICONERROR);
 		}

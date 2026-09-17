@@ -77,7 +77,7 @@ You should try reducing the latency, too. I prefer to do that by directly editin
 
 **IMPORTANT**: when you alternate to Cables (or any other app), Rocksmith's audio will mute. That's normal. When reconnecting the signal paths, keep both ROcksmith outputs connected to something at all times: if you want to route both outputs to the right channel on your headphone, for instance, first create a new connection from "left Rocksmith" to "right headphone", then disconnect "left Rocksmith" from "left headphone".
 
-This guide works for both *Rocksmith*, using Rocksmith on Linux, and *Rocksmith 2014*, using [RS ASIO](https://github.com/mdias/rs_asio). If you want to use the shell script provided here to run 2014, you will have to modify the game id number from 205190 to 221680.
+This guide works for both *Rocksmith*, using Rocksmith on Linux, and *Rocksmith 2014*, using [RS ASIO](https://github.com/mdias/rs_asio). To use the shell script provided here to run 2014, alter the following variables.
 
 `pipewire-jack` is **not** required for PipeASIO — it talks to PipeWire directly via `libpipewire-0.3`, with no JACK dependency. Only install it if you plan to use WineASIO/JACK instead. It would also be required to routing the audio signal to other JACK dependant applications, like Guitarix.
 

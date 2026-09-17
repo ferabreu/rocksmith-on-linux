@@ -9,6 +9,11 @@ class RSAsioDevice;
 class RSAsioAudioRenderClient;
 class RSAsioAudioCaptureClient;
 
+// Rocksmith 2011 always uses WASAPI polling mode (no event callback) and has no
+// Win32UltraLowLatencyMode setting; call this from its IAT patch so the
+// event-callback warning dialog (meant for RS2014) isn't shown for it.
+void RSAsioAudioClient_SetPollingModeExpected(bool expected);
+
 class RSAsioAudioClient : public ComBaseUnknown<IAudioClient3>, protected IAsioBufferSwitchListener
 {
 public:

@@ -1,6 +1,7 @@
 #include "stdafx.h"
 #include "dllmain.h"
 #include "Patcher.h"
+#include "RSAsioAudioClient.h"
 #include <setupapi.h>
 
 // ---------------------------------------------------------------------------
@@ -535,6 +536,10 @@ static HRESULT STDAPICALLTYPE Patched_CoGetInterfaceAndReleaseStream(
 void PatchOriginalCode_e0f686e0()
 {
 	rslog::info_ts() << __FUNCTION__ << " - patching Rocksmith 2011 via IAT" << std::endl;
+
+	// RS2011 always uses WASAPI polling mode and has no Win32UltraLowLatencyMode
+	// setting, so don't show the warning dialog meant to flag that setting missing.
+	RSAsioAudioClient_SetPollingModeExpected(true);
 
 	// Wine/Proton regression: newer versions no longer auto-register USB audio devices
 	// in the KS device class registry. Create the missing entries so that the game's
