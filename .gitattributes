@@ -1,0 +1,4 @@
+# The GitHub Actions build runs on windows-2022, which defaults to CRLF
+# checkouts. These scripts must stay LF-terminated to run on Linux.
+*.sh text eol=lf
+assets/pipeasio-register text eol=lf
