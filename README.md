@@ -1,11 +1,9 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/assets/rocksmith-on-linux-logo-plain-dark.svg">
-    <img alt="Rocksmith on Linux" src="docs/assets/rocksmith-on-linux-logo-plain-light.svg" width="600">
+    <img alt="Rocksmith on Linux" src="docs/assets/rocksmith-on-linux-logo-plain-light.svg" width="500">
   </picture>
 </p>
-
-## Intro
 
 *Rocksmith on Linux* is a patch that adds ASIO support to Ubisoft's **Rocksmith**, allowing the game to be run on Linux using Proton, PipeWire and an ASIO driver for Wine.
 
@@ -14,6 +12,7 @@ This project is a fork of [RS ASIO](https://github.com/mdias/rs_asio), by Micael
 Using Ubisoft's Real Tone Cable is still required. Rocksmith does not work without it. Because of that, the only practical purpose of this mod is to allow the game to run on Linux with low latency and good performance.
 
 In my experience, using this patch while running the game on a relatively modern Linux system makes it playable as if it were running on Windows. On a modern machine, PipeWire makes it possible to get really low latency and redirect the audio output in useful/creative ways, like for recording or listening to your playing's "raw tone" (this is especially useful, since Rocksmith makes your tone better than it would sound in a real live scenario).
+
 
 ## How to use
 
@@ -43,7 +42,6 @@ Check the [setup guide](docs/setup-guide.md).
 
 - Remove the copied files (and `RS_ASIO.log`) from the game folder.
 
----
 
 ## Known issues
 
@@ -53,7 +51,6 @@ Check the [setup guide](docs/setup-guide.md).
 - Sometimes, the game will not start. That's probably a momentary issue. Just try again and it should work.
 - I'll attempt to follow the upstream RS ASIO versioning scheme and bring its improvements to this fork. However, because of the local changes, not all updates will be appliable/carried over.
   
----
 
 ## Disclaimer
 
@@ -75,7 +72,6 @@ Check the [setup guide](docs/setup-guide.md).
 - This project is an independent effort and is not affiliated with, endorsed by, or approved by Ubisoft.
 - The logo displayed above is a modified version of the original Rocksmith logo, created by Ubisoft, and is used here for informational purposes only, to indicate that the project is related to Rocksmith. The logo and branding are protected and cannot be used for commercial purposes without authorization from Ubisoft.
 
----
 
 ## Additional technical details
 
@@ -89,11 +85,9 @@ These may be interesting for those who want to understand how the project was de
 
 If you're on an older system still using PulseAudio, it may be possible to use the patch with WineASIO and JACK instead of PipeASIO/PipeWire. Proton's audio driver can be selected with the `WINE_AUDIO_DRIVER` environment variable (the default fallback list is `pipewire,pulse,alsa`) — setting it to `pulse` forces PulseAudio. This isn't an officially supported path, just a possibility worth mentioning. See the [technical details document](docs/tech-details.md) for the Proton/Wine specifics.
 
----
 
-## Credits
-
-Developed with the assistance of GitHub Copilot, Claude Sonnet 4.6/5 and Claude Haiku 4.5, based on my specs.
+## Credits & Acknowledgments
 
 This project is a fork of [RS ASIO](https://github.com/mdias/rs_asio), by Micael Dias, without which this project would not be possible. RS ASIO is still being maintained and developed, and I recommend checking it out if you want to use ASIO with Rocksmith 2014.
 
+Assisted by: Claude Sonnet 4.6/5 and Claude Haiku 4.5, GitHub Copilot.

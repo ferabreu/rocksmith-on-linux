@@ -61,17 +61,25 @@
    ${HOME}/.local/bin/pipeasio-register
    ```
 
-8. Open Cable and set the Sample Rate to 48000. Leave the Quantum as it is, probably 1024 - you'll tweak it later.
+8. Open Cable and leave the Sample Rate and Quantum as they are - `rocksmith-on-linux.sh` pins both for the duration of the game (see below), so they don't need to be set here.
 
 9. Open Cables, and leave it running.
 
 10. Run the game using the provided shell script. It should open a terminal window and then the game, with audio autput.
 
+## Buffer size and sample rate
+
+`rocksmith-on-linux.sh` sets `PIPEASIO_PREFERRED_BUFFERSIZE` and `PIPEASIO_SAMPLE_RATE` at the top of the file, under "USER CONFIGURATION". Besides configuring PipeASIO itself, the script also uses these two values to pin PipeWire's own daemon-wide quantum and sample rate (via `pw-metadata`) before launching the game, and restores whatever was set before once the game exits.
+
+This matters because PipeWire's daemon-wide forced quantum (e.g. set by Cable) overrides any per-app request, PipeASIO's included - without this, editing `PIPEASIO_PREFERRED_BUFFERSIZE` alone can silently have no effect if it disagrees with the system-wide setting, causing crackling. Requires the `pw-metadata` command (ships with PipeWire on most distributions); if it's missing, the script prints a warning and skips pinning, falling back to whatever Cable/WirePlumber has set.
+
+To change the buffer size or sample rate, edit those two variables directly in the script - not Cable's Quantum/Sample Rate fields, which are only pinned while the game is running.
+
 ## Further optimizations
 
 This is the initial setup I performed in my own system. From there, you can set up Rocksmith as you prefer - I like to run it on a window, so I can open other apps and adjust Cables as needed. I also create a desktop app entry on the applications menu pointing to the shell script, for convenience.
 
-You should try reducing the latency, too. I prefer to do that by directly editing `Rocksmith.ini`: edit the file, adjust the Quantum on Cable to match, and run the game. Keep going until you get audio problems, then back up one step. Find what works for you.
+You should try reducing the latency, too. I prefer to do that by directly editing `Rocksmith.ini`: edit the file, and adjust `PIPEASIO_PREFERRED_BUFFERSIZE` in `rocksmith-on-linux.sh` to match (no need to touch Cable - the script pins the quantum itself). Keep going until you get audio problems, then back up one step. Find what works for you.
 
 ## Additional information
 

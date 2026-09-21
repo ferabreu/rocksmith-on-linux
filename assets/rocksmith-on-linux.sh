@@ -14,9 +14,18 @@ set -euo pipefail
 # Which game to launch: 'Rocksmith' or 'Rocksmith2014'
 GAME='Rocksmith'
 
-# PipeWire quantum/sample rate for the game's audio. Lower values reduce
+# PipeWire (and PipeASIO) quantum/sample rate for the game's audio. Lower values reduce
 # latency but may cause dropouts; see the setup guide for tuning tips.
-export PIPEWIRE_LATENCY='128/48000'
+#
+# NOTE: if PipeWire has a daemon-wide forced quantum/rate (checked and pinned
+# below via pw-metadata), it overrides any per-app request - including
+# PipeASIO's own. These two values are also used below to pin PipeWire's
+# daemon-wide clock so they actually take effect.
+export PIPEASIO_PREFERRED_BUFFERSIZE='128'
+export PIPEASIO_SAMPLE_RATE='48000'
+
+# Not needed for PipeASIO - kept for reference. To be removed in the future.
+# export PIPEWIRE_LATENCY="${PIPEASIO_PREFERRED_BUFFERSIZE}/${PIPEASIO_SAMPLE_RATE}"
 
 # Steam's default library, where Steam itself and its compat tools are
 # installed. This is not necessarily where the game itself lives.
@@ -70,8 +79,39 @@ export STEAM_COMPAT_DATA_PATH="${STEAMAPPS}/compatdata/${APP}"
 export SteamClientLaunch='1'
 export SteamEnv='1'
 
-# Launch the game through the runtime and Proton, from its own directory
-exec env --chdir="${GAME_DIR}" \
+# PipeWire's daemon-wide forced quantum/rate (clock.force-quantum/force-rate in
+# the "settings" metadata, e.g. set by the Cable app) overrides any per-app
+# request, including PipeASIO's. Pin it to match PIPEASIO_PREFERRED_BUFFERSIZE/
+# PIPEASIO_SAMPLE_RATE above so they actually take effect, and restore
+# whatever was set before on exit.
+ORIG_FORCE_QUANTUM=''
+ORIG_FORCE_RATE=''
+restore_pipewire_clock() {
+    if [[ -n "${ORIG_FORCE_QUANTUM}" ]]; then
+        pw-metadata -n settings 0 clock.force-quantum "${ORIG_FORCE_QUANTUM}" >/dev/null || true
+    else
+        pw-metadata -n settings -d 0 clock.force-quantum >/dev/null || true
+    fi
+    if [[ -n "${ORIG_FORCE_RATE}" ]]; then
+        pw-metadata -n settings 0 clock.force-rate "${ORIG_FORCE_RATE}" >/dev/null || true
+    else
+        pw-metadata -n settings -d 0 clock.force-rate >/dev/null || true
+    fi
+}
+if command -v pw-metadata >/dev/null; then
+    ORIG_FORCE_QUANTUM=$(pw-metadata -n settings 0 clock.force-quantum 2>/dev/null | sed -n "s/.*value:'\([^']*\)'.*/\1/p")
+    ORIG_FORCE_RATE=$(pw-metadata -n settings 0 clock.force-rate 2>/dev/null | sed -n "s/.*value:'\([^']*\)'.*/\1/p")
+    trap restore_pipewire_clock EXIT
+    pw-metadata -n settings 0 clock.force-quantum "${PIPEASIO_PREFERRED_BUFFERSIZE}" >/dev/null
+    pw-metadata -n settings 0 clock.force-rate "${PIPEASIO_SAMPLE_RATE}" >/dev/null
+else
+    >&2 echo 'Warning: pw-metadata not found; cannot pin PipeWire'\''s daemon-wide quantum/rate.'
+fi
+
+# Launch the game through the runtime and Proton, from its own directory.
+# Not exec'd: the EXIT trap above must run after the game exits to restore
+# PipeWire's clock settings.
+env --chdir="${GAME_DIR}" \
   "${STEAM_RUNTIME_LAUNCHER}" \
   container-runtime "${PROTON_BIN}" \
   waitforexitandrun "${GAME_DIR}/${GAME}.exe" -uplay_steam_mode
