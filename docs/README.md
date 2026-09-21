@@ -21,7 +21,7 @@ In my experience, using this patch while running the game on a relatively modern
 
 From version 0.7.5-rs1.1 onwards, this project focuses on running the game with PipeWire and PipeASIO — this setup has made the whole configuration process much easier, for running both Rocksmith and Rocksmith 2014. WineASIO/JACK is also supported as an alternative — see the setup guide for that path.
 
-I have tested only the Steam version of Rocksmith - so, I cannot assume other versions will work. Also, I run CachyOS, and have not tested any other Linux Systems. Arch-based distros would probably require minor modifications for setting this up.
+I have tested only the Steam version of Rocksmith — so I cannot assume other versions will work. Also, I run CachyOS, and have not tested any other Linux systems. Arch-based distros would probably require minor modifications for setting this up.
 
 ### Installation
 
@@ -46,8 +46,8 @@ Check [setup-guide.md](setup-guide.md), included in this package.
 - 32-bit game, 32-bit problems. PipeASIO simplifies this greatly, because it allows using Windows' SysWOW64 under Proton versions that support it. Check the [setup guide](setup-guide.md).
 - Hardware hotplugging while the game is running won't be noticed by the game.
 - Sometimes, the game will not start. That's probably a momentary issue. Just try again and it should work.
-- I'll attempt to follow the upstream RS ASIO versioning scheme and bring its improvements to this fork. However, because of the local changes, not all updates will be appliable/carried over.
-  - RS ASIO v0.7.5 --> Rocksmith on Linux v0.7.5.rs1."x".
+- I'll attempt to follow the upstream RS ASIO versioning scheme and bring its improvements to this fork. However, because of the local changes, not all updates will be applicable/carried over.
+  - RS ASIO v0.7.5 --> Rocksmith on Linux v0.7.5.rs1.x.
 
 ---
 

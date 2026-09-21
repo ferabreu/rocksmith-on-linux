@@ -111,7 +111,17 @@ fi
 # Launch the game through the runtime and Proton, from its own directory.
 # Not exec'd: the EXIT trap above must run after the game exits to restore
 # PipeWire's clock settings.
-env --chdir="${GAME_DIR}" \
-  "${STEAM_RUNTIME_LAUNCHER}" \
-  container-runtime "${PROTON_BIN}" \
-  waitforexitandrun "${GAME_DIR}/${GAME}.exe" -uplay_steam_mode
+LAUNCH_CMD=(
+  env --chdir="${GAME_DIR}" \
+    "${STEAM_RUNTIME_LAUNCHER}" \
+    container-runtime "${PROTON_BIN}" \
+    waitforexitandrun "${GAME_DIR}/${GAME}.exe" -uplay_steam_mode
+)
+
+# game-performance (CachyOS) must wrap the whole chain above, not just the
+# exe, so it can restore the power profile once everything under it exits.
+if command -v game-performance >/dev/null; then
+    LAUNCH_CMD=(game-performance "${LAUNCH_CMD[@]}")
+fi
+
+"${LAUNCH_CMD[@]}"

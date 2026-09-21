@@ -25,9 +25,9 @@ In my experience, using this patch while running the game on a relatively modern
   - Steam (and Proton)
 - Steam's version of Rocksmith installed and [correctly set up](docs/setup-guide.md).
 
-From version 0.7.5-rs1.1 onwards, I'm focusing on running the game with PipeWire and PipeASIO - this setup has [made the whole config process much easier](docs/setup-guide.md) for me, for running both Rocksmith and Rocksmith 2014.
+From version 0.7.5-rs1.1 onwards, I'm focusing on running the game with PipeWire and PipeASIO — this setup has [made the whole configuration process much easier](docs/setup-guide.md) for me, when running both Rocksmith and Rocksmith 2014.
 
-I have tested only the Steam version of Rocksmith - so, I cannot assume other versions will work.
+I have tested only the Steam version of Rocksmith — so I cannot assume other versions will work.
 
 ### Installation
 
@@ -49,7 +49,7 @@ Check the [setup guide](docs/setup-guide.md).
 - 32-bit game, 32-bit problems. PipeASIO simplifies this greatly, because it allows using Windows' SysWOW64 under Proton versions that support it. Check the [setup guide](docs/setup-guide.md).
 - Hardware hotplugging while the game is running won't be noticed by the game.
 - Sometimes, the game will not start. That's probably a momentary issue. Just try again and it should work.
-- I'll attempt to follow the upstream RS ASIO versioning scheme and bring its improvements to this fork. However, because of the local changes, not all updates will be appliable/carried over.
+- I'll attempt to follow the upstream RS ASIO versioning scheme and bring its improvements to this fork. However, because of the local changes, not all updates will be applicable/carried over.
   
 
 ## Disclaimer
