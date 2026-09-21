@@ -38,6 +38,8 @@ I have tested only the Steam version of Rocksmith — so I cannot assume other v
 
 Check the [setup guide](docs/setup-guide.md).
 
+(It also covers running *Rocksmith 2014* with [RS ASIO](https://github.com/mdias/rs_asio).)
+
 ### Removal
 
 - Remove the copied files (and `RS_ASIO.log`) from the game folder.
