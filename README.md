@@ -36,9 +36,7 @@ I have tested only the Steam version of Rocksmith — so I cannot assume other v
 
 ### Configuration
 
-Check the [setup guide](docs/setup-guide.md).
-
-(It also covers running *Rocksmith 2014* with [RS ASIO](https://github.com/mdias/rs_asio).)
+Check the [setup guide](docs/setup-guide.md) — it also covers running *Rocksmith 2014* with [RS ASIO](https://github.com/mdias/rs_asio).
 
 ### Removal
 
